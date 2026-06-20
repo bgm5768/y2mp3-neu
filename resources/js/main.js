@@ -331,7 +331,7 @@ const QueueUI = {
       container.appendChild(itemButton('open', item.id, '파일 열기', 'btn-secondary'));
     }
 
-    container.appendChild(itemButton('remove', item.id, '삭제', 'btn-ghost'));
+    container.appendChild(itemButton('remove', item.id, '항목 지우기', 'btn-ghost'));
   },
 
   updateItem(id, patch) {
@@ -616,7 +616,7 @@ async function runQueue(ids = null) {
     Toast.show(
       doneCount === 1 ? '다운로드 완료' : `${doneCount}개 다운로드 완료`,
       'success',
-      5000,
+      3000,
       lastFilePath ? { label: '저장 폴더 열기', onClick: () => openContainingFolder(lastFilePath) } : null
     );
   }
