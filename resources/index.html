@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YT → MP3 Converter</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- ── SIDEBAR ───────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="logo-icon">🎵</span>
+      <span class="logo-text">YT MP3</span>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-btn active" data-tab="convert">
+        <span class="nav-icon">⬇️</span> 변환
+      </button>
+      <button class="nav-btn" data-tab="settings">
+        <span class="nav-icon">⚙️</span> 설정
+      </button>
+    </nav>
+
+    <div class="sidebar-bottom">
+      <div id="ffmpeg-status" class="status-badge status-checking">
+        <span class="dot"></span> ffmpeg 확인 중…
+      </div>
+      <div id="ytdlp-status" class="status-badge status-checking">
+        <span class="dot"></span> yt-dlp 확인 중…
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ──────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- ===== TAB: CONVERT ===== -->
+    <section id="tab-convert" class="tab active">
+      <div class="page-header">
+        <h1>YouTube → MP3 변환</h1>
+        <p class="subtitle">URL 개수에 따라 단일 또는 다중 변환으로 자동 처리됩니다.</p>
+      </div>
+
+      <!-- URL 입력 카드 -->
+      <div class="card conversion-card">
+        <label for="url-input" class="input-guide">
+          변환할 YouTube URL을 입력하세요. 여러 개는 줄바꿈으로 구분할 수 있습니다.
+        </label>
+        <div class="url-row">
+          <textarea
+            id="url-input"
+            class="url-input url-textarea"
+            rows="3"
+            placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/...&#10;https://www.youtube.com/shorts/..."
+            autocomplete="off"
+            spellcheck="false"
+          ></textarea>
+          <button id="paste-btn" class="btn btn-ghost" title="클립보드에서 붙여넣기">📋 붙여넣기</button>
+        </div>
+
+        <div id="url-analysis" class="url-analysis">유효한 URL 0개</div>
+
+        <div class="conversion-controls">
+          <div class="convert-options">
+            <label class="option-label">
+              음질
+              <select id="quality-select" class="select">
+                <option value="320">320 kbps (최고)</option>
+                <option value="256">256 kbps</option>
+                <option value="192" selected>192 kbps (기본)</option>
+                <option value="128">128 kbps</option>
+                <option value="96">96 kbps</option>
+              </select>
+            </label>
+
+            <label class="option-label">
+              출력 형식
+              <select id="format-select" class="select">
+                <option value="mp3" selected>MP3</option>
+                <option value="m4a">M4A</option>
+                <option value="wav">WAV</option>
+                <option value="flac">FLAC</option>
+              </select>
+            </label>
+
+            <label class="option-label checkbox-label">
+              <input type="checkbox" id="embed-thumb" checked />
+              썸네일 삽입
+            </label>
+            <label class="option-label checkbox-label">
+              <input type="checkbox" id="embed-meta" checked />
+              메타데이터 삽입
+            </label>
+          </div>
+
+          <div class="action-row">
+            <button id="convert-btn" class="btn btn-primary" disabled>URL을 입력해주세요</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 변환 대기열 -->
+      <div id="queue-panel" class="queue-panel hidden">
+        <div class="queue-panel-header">
+          <div>
+            <h2>변환 대기열</h2>
+            <p id="queue-summary" class="queue-summary">대기 중인 항목이 없습니다.</p>
+          </div>
+          <div class="queue-toolbar">
+            <button id="start-all-btn" class="btn btn-primary btn-sm">전체 시작</button>
+            <button id="clear-completed-btn" class="btn btn-secondary btn-sm">완료 항목 삭제</button>
+            <button id="clear-queue-btn" class="btn btn-ghost btn-sm">전체 삭제</button>
+          </div>
+        </div>
+        <div id="queue-empty" class="queue-empty hidden">
+          변환할 URL을 입력하면 이곳에 진행 상태가 표시됩니다.
+        </div>
+        <div id="queue-list" class="queue-list">
+          <!-- Queue items injected by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== TAB: SETTINGS ===== -->
+    <section id="tab-settings" class="tab">
+      <div class="page-header">
+        <h1>설정</h1>
+      </div>
+
+      <!-- 저장 위치 -->
+      <div class="card settings-card">
+        <h2 class="settings-section-title">💾 저장 위치</h2>
+        <div class="settings-group">
+          <label class="radio-label">
+            <input type="radio" name="save-dest" value="local" checked />
+            <span class="radio-box">
+              <span class="radio-icon">🖥</span>
+              <span>
+                <strong>내 PC</strong>
+                <small id="local-path-display">경로 선택 안 됨</small>
+              </span>
+            </span>
+          </label>
+          <button id="local-path-btn" class="btn btn-ghost btn-sm indent">📁 경로 선택…</button>
+        </div>
+
+        <div class="settings-group">
+          <label class="radio-label">
+            <input type="radio" name="save-dest" value="pcloud" />
+            <span class="radio-box">
+              <span class="radio-icon">☁️</span>
+              <span>
+                <strong>pCloud Drive</strong>
+                <small id="pcloud-path-display">폴더 미지정</small>
+              </span>
+            </span>
+          </label>
+          <button id="pcloud-path-btn" class="btn btn-ghost btn-sm indent">📁 pCloud 폴더…</button>
+        </div>
+
+        <div class="settings-group">
+          <label class="radio-label">
+            <input type="radio" name="save-dest" value="gdrive" />
+            <span class="radio-box">
+              <span class="radio-icon">🟢</span>
+              <span>
+                <strong>Google Drive</strong>
+                <small id="gdrive-path-display">폴더 미지정</small>
+              </span>
+            </span>
+          </label>
+          <button id="gdrive-path-btn" class="btn btn-ghost btn-sm indent">📁 Google Drive 폴더…</button>
+        </div>
+      </div>
+
+      <!-- ffmpeg / yt-dlp -->
+      <div class="card settings-card">
+        <h2 class="settings-section-title">🔧 의존성 도구</h2>
+
+        <div class="dep-row">
+          <div class="dep-info">
+            <strong>ffmpeg</strong>
+            <span id="ffmpeg-version" class="dep-version">확인 중…</span>
+          </div>
+          <button id="install-ffmpeg-btn" class="btn btn-secondary btn-sm">⬇ 설치 / 업데이트</button>
+        </div>
+
+        <div class="dep-row">
+          <div class="dep-info">
+            <strong>yt-dlp</strong>
+            <span id="ytdlp-version" class="dep-version">확인 중…</span>
+          </div>
+          <button id="update-ytdlp-btn" class="btn btn-secondary btn-sm">⬇ 업데이트</button>
+        </div>
+      </div>
+
+      
+
+      <div class="settings-save-row">
+        <button id="save-settings-btn" class="btn btn-primary">💾 설정 저장</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── TOAST ─────────────────────────────────────── -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- ── SCRIPTS ───────────────────────────────────── -->
+  <script src="js/neutralino.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/queue.js"></script>
+  <script src="js/ytdlp.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

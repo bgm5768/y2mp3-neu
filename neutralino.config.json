@@ -1,0 +1,51 @@
+{
+  "applicationId": "js.neutralino.yt-mp3-converter",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "port": 0,
+  "documentRoot": "/resources/",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "tokenSecurity": "one-time",
+  "logging": {
+    "enabled": true,
+    "writeToLogFile": true
+  },
+  "nativeAllowList": [
+    "app.*",
+    "os.*",
+    "storage.*",
+    "filesystem.*",
+    "debug.*",
+    "window.*",
+    "clipboard.*"
+  ],
+  "globalVariables": {},
+  "modes": {
+    "window": {
+      "title": "YT → MP3 Converter",
+      "width": 900,
+      "height": 640,
+      "minWidth": 800,
+      "minHeight": 580,
+      "fullScreen": false,
+      "alwaysOnTop": false,
+      "icon": "/resources/icons/app.png",
+      "enableInspector": false,
+      "borderless": false,
+      "maximize": false,
+      "hidden": false,
+      "resizable": true,
+      "exitProcessOnClose": true
+    }
+  },
+  "cli": {
+    "binaryName": "yt-mp3-converter",
+    "resourcesPath": "/resources/",
+    "extensionsPath": "/extensions/",
+    "clientLibrary": "/resources/js/neutralino.js",
+    "binaryVersion": "5.5.0",
+    "clientVersion": "5.1.1"
+  }
+}

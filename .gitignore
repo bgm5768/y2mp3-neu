@@ -1,0 +1,11 @@
+node_modules/
+bin/
+dist/
+.neutralino/
+*.log
+neutralino-linux
+neutralino-mac
+neutralino-win.exe
+neutralino-arm_*
+webview.dll
+WebView2Loader.dll

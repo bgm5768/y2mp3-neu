@@ -1,0 +1,20 @@
+{
+  "name": "yt-mp3-converter",
+  "version": "1.0.0",
+  "description": "YouTube to MP3 Converter powered by Neutralinojs",
+  "main": "extension/app.js",
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "dev": "neu run",
+    "build": "neu build"
+  },
+  "dependencies": {
+    "yt-dlp-wrap": "^2.3.12",
+    "ffmpeg-static": "^5.2.0",
+    "fs-extra": "^11.2.0",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@neutralinojs/neu": "^11.5.0"
+  }
+}
