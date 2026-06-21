@@ -789,7 +789,8 @@ const Player = (() => {
     saveTimer: null,
     pendingSave: {},
     restoredLastTrack: false,
-    restoringPosition: null
+    restoringPosition: null,
+    openMenuTrackId: ''
   };
 
   function el(id) {
@@ -982,6 +983,53 @@ const Player = (() => {
 
   function trackTitle(path) {
     return fileName(path).replace(/\.[^.]+$/, '') || '제목 없음';
+  }
+
+  function directoryName(path) {
+    const value = String(path || '');
+    const index = Math.max(value.lastIndexOf('\\'), value.lastIndexOf('/'));
+    return index >= 0 ? value.slice(0, index) : '';
+  }
+
+  function fileExtension(name) {
+    const match = String(name || '').match(/(\.[^.]*)$/);
+    return match ? match[1] : '';
+  }
+
+  function normalizeRenameFileName(input, oldFileName) {
+    const oldExt = fileExtension(oldFileName);
+    let base = String(input || '').trim().replace(/^["']+|["']+$/g, '');
+    if (!base) {
+      return { ok: false, message: '새 파일 이름을 입력해 주세요.' };
+    }
+
+    if (oldExt && base.toLowerCase().endsWith(oldExt.toLowerCase())) {
+      base = base.slice(0, -oldExt.length);
+    }
+
+    const nextName = `${base}${oldExt}`;
+    const invalidReason = validateFileName(nextName);
+    return invalidReason ? { ok: false, message: invalidReason } : { ok: true, name: nextName };
+  }
+
+  function validateFileName(name) {
+    const value = String(name || '');
+    if (!value.trim()) return '새 파일 이름을 입력해 주세요.';
+    if (/[<>:"/\\|?*\x00-\x1f]/.test(value)) return '파일 이름에 사용할 수 없는 문자가 포함되어 있습니다.';
+    if (/[. ]$/.test(value)) return '파일 이름은 공백이나 점으로 끝날 수 없습니다.';
+    if (value === '.' || value === '..') return '사용할 수 없는 파일 이름입니다.';
+    const base = value.replace(/\.[^.]*$/, '').toUpperCase();
+    if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(base)) return 'Windows 예약어는 파일 이름으로 사용할 수 없습니다.';
+    return '';
+  }
+
+  async function pathExists(path) {
+    try {
+      await Neutralino.filesystem.getStats(path);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function mimeType(path) {
@@ -1810,6 +1858,218 @@ const Player = (() => {
     return state.queue[state.queuePosition] || null;
   }
 
+  function queueIndexByTrackId(trackId) {
+    return state.queue.findIndex(track => track.id === trackId);
+  }
+
+  function closeTrackMenu() {
+    state.openMenuTrackId = '';
+    document.getElementById('player-track-context-menu')?.classList.add('hidden');
+    document
+      .querySelectorAll('.player-track-more[aria-expanded="true"]')
+      .forEach(button => button.setAttribute('aria-expanded', 'false'));
+  }
+
+  function ensureTrackMenu() {
+    let menu = el('player-track-context-menu');
+    if (menu) return menu;
+
+    menu = document.createElement('div');
+    menu.id = 'player-track-context-menu';
+    menu.className = 'player-track-menu hidden';
+    menu.setAttribute('role', 'menu');
+
+    const rename = document.createElement('button');
+    rename.type = 'button';
+    rename.dataset.trackMenuAction = 'rename';
+    rename.setAttribute('role', 'menuitem');
+    rename.textContent = '이름 바꾸기';
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.dataset.trackMenuAction = 'remove';
+    remove.className = 'danger';
+    remove.setAttribute('role', 'menuitem');
+    remove.textContent = '목록에서 제거';
+
+    menu.append(rename, remove);
+    menu.addEventListener('click', event => {
+      const button = event.target.closest('button[data-track-menu-action]');
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const trackId = menu.dataset.trackId || '';
+      const action = button.dataset.trackMenuAction;
+      closeTrackMenu();
+
+      if (action === 'rename') {
+        void renameTrackFile(trackId);
+      } else if (action === 'remove') {
+        void removeTrackFile(trackId);
+      }
+    });
+
+    document.body.appendChild(menu);
+    return menu;
+  }
+
+  function openTrackMenu(trackId, anchor) {
+    const menu = ensureTrackMenu();
+    state.openMenuTrackId = trackId;
+    menu.dataset.trackId = trackId;
+    menu.classList.remove('hidden');
+    menu.style.visibility = 'hidden';
+
+    const rect = anchor.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const margin = 10;
+    const width = menuRect.width || 156;
+    const height = menuRect.height || 92;
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - height - margin);
+    const left = Math.min(maxLeft, Math.max(margin, rect.right - width));
+    const top = Math.min(maxTop, Math.max(margin, rect.bottom + 8));
+
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    menu.style.visibility = '';
+
+    document
+      .querySelectorAll('.player-track-more')
+      .forEach(button => button.setAttribute('aria-expanded', button === anchor ? 'true' : 'false'));
+  }
+
+  function updateTrackPath(oldId, nextPath, oldTitle) {
+    const nextId = nextPath.toLowerCase();
+    const nextFileName = fileName(nextPath);
+    const nextExt = nextFileName.split('.').pop()?.toLowerCase() || '';
+    const seen = new Set();
+
+    [...state.tracks, ...state.queue].forEach(track => {
+      if (!track || track.id !== oldId || seen.has(track)) return;
+      seen.add(track);
+      const usesFileTitle = !track.metadataLoaded || !track.title || track.title === oldTitle;
+      track.id = nextId;
+      track.path = nextPath;
+      track.fileName = nextFileName;
+      track.ext = nextExt;
+      if (usesFileTitle) track.title = trackTitle(nextPath);
+    });
+
+    state.metadataPromises.delete(oldId);
+    state.streamInfoPromises.delete(oldId);
+    rebuildQueue(currentTrack()?.id === oldId ? nextId : currentTrack()?.id || nextId);
+    return nextId;
+  }
+
+  async function renameTrackFile(trackId) {
+    const index = queueIndexByTrackId(trackId);
+    const track = state.queue[index];
+    if (!track) return;
+
+    const oldFileName = track.fileName || fileName(track.path);
+    const input = window.prompt('새 파일 이름을 입력하세요. 확장자는 자동으로 유지됩니다.', oldFileName);
+    if (input === null) return;
+
+    const normalized = normalizeRenameFileName(input, oldFileName);
+    if (!normalized.ok) {
+      Toast.show(normalized.message, 'error', 5000);
+      return;
+    }
+
+    const dir = directoryName(track.path);
+    if (!dir) {
+      Toast.show('파일 경로를 확인할 수 없습니다.', 'error', 5000);
+      return;
+    }
+
+    const nextPath = joinPath(dir, normalized.name);
+    if (nextPath.toLowerCase() === track.path.toLowerCase()) return;
+
+    if (await pathExists(nextPath)) {
+      Toast.show('같은 이름의 파일이 이미 있습니다.', 'error', 5000);
+      return;
+    }
+
+    const audio = el('audio-player');
+    const current = currentTrack();
+    const oldId = track.id;
+    const oldTitle = trackTitle(track.path);
+    const wasCurrent = current?.id === oldId;
+    const wasPlaying = !!(wasCurrent && audio && !audio.paused);
+    const position = wasCurrent ? Math.floor(displayCurrentTime()) : 0;
+
+    try {
+      if (wasCurrent && audio) clearAudioSource(audio);
+      await Neutralino.filesystem.move(track.path, nextPath);
+      const nextId = updateTrackPath(oldId, nextPath, oldTitle);
+      const nextIndex = queueIndexByTrackId(nextId);
+
+      if (wasCurrent && nextIndex >= 0) {
+        await loadTrack(nextIndex, wasPlaying, { restorePosition: position });
+      } else {
+        render();
+      }
+
+      Toast.show('파일 이름을 변경했습니다.', 'success', 4000);
+    } catch (e) {
+      Toast.show(`파일 이름을 변경하지 못했습니다: ${e.message || e}`, 'error', 7000);
+      if (wasCurrent) void loadLibrary({ force: true });
+    }
+  }
+
+  async function confirmRemoveTrack(track) {
+    const message = `${track.fileName || fileName(track.path)}\n\n이 작업은 실제 음악 파일을 삭제합니다. 계속할까요?`;
+    try {
+      const choice = await Neutralino.os.showMessageBox('목록에서 제거', message, 'YES_NO', 'WARNING');
+      return /^(YES|OK)$/i.test(String(choice || ''));
+    } catch {
+      return window.confirm(message);
+    }
+  }
+
+  async function removeTrackFile(trackId) {
+    const index = queueIndexByTrackId(trackId);
+    const track = state.queue[index];
+    if (!track) return;
+    if (!(await confirmRemoveTrack(track))) return;
+
+    const audio = el('audio-player');
+    const current = currentTrack();
+    const wasCurrent = current?.id === track.id;
+    const preserveId = wasCurrent ? '' : current?.id || '';
+
+    try {
+      if (wasCurrent && audio) clearAudioSource(audio);
+      await Neutralino.filesystem.remove(track.path);
+
+      state.metadataPromises.delete(track.id);
+      state.streamInfoPromises.delete(track.id);
+      state.tracks = state.tracks.filter(item => item.id !== track.id);
+      state.queue = sortTracks(state.tracks);
+      state.queuePosition = preserveId
+        ? state.queue.findIndex(item => item.id === preserveId)
+        : -1;
+      if (state.queuePosition < 0 && preserveId && state.queue.length) state.queuePosition = 0;
+
+      if (wasCurrent) {
+        savePlayerSettings({
+          playerLastTrackId: '',
+          playerLastTrackPath: '',
+          playerLastPosition: 0,
+          playerLastDuration: 0
+        }, { immediate: true });
+      }
+
+      render();
+      Toast.show('파일을 삭제하고 목록에서 제거했습니다.', 'success', 4500);
+    } catch (e) {
+      Toast.show(`파일을 삭제하지 못했습니다: ${e.message || e}`, 'error', 7000);
+      if (wasCurrent) void loadLibrary({ force: true });
+    }
+  }
+
   function setCurrentArtwork(track) {
     const art = el('player-art');
     if (!art) return;
@@ -1943,10 +2203,12 @@ const Player = (() => {
     }
 
     filteredTracks.forEach(({ track, index }) => {
-      const item = document.createElement('button');
-      item.type = 'button';
+      const item = document.createElement('div');
       item.className = `player-track ${index === state.queuePosition ? 'active' : ''}`;
       item.dataset.index = String(index);
+      item.dataset.trackId = track.id;
+      item.setAttribute('role', 'button');
+      item.tabIndex = 0;
 
       const number = document.createElement('span');
       number.className = 'player-track-number';
@@ -1972,8 +2234,15 @@ const Player = (() => {
       action.className = 'player-track-action';
       action.textContent = index === state.queuePosition ? '재생 중' : '대기';
 
-      const more = document.createElement('span');
+      const more = document.createElement('button');
+      more.type = 'button';
       more.className = 'player-track-more';
+      more.dataset.playerAction = 'menu';
+      more.dataset.trackId = track.id;
+      more.title = '더보기';
+      more.setAttribute('aria-label', `${track.title || track.fileName} 더보기`);
+      more.setAttribute('aria-haspopup', 'menu');
+      more.setAttribute('aria-expanded', state.openMenuTrackId === track.id ? 'true' : 'false');
       more.textContent = '⋮';
 
       item.append(number, info, duration, action, more);
@@ -2335,8 +2604,26 @@ const Player = (() => {
     const audio = el('audio-player');
     if (!audio) return;
     if (state.repeatMode === 'repeat-one') {
-      audio.currentTime = 0;
-      await audio.play();
+      const index = state.queuePosition;
+      if (index < 0 || !state.queue[index]) return;
+
+      state.seekPreviewTime = null;
+      state.restoredPreviewTime = 0;
+      state.restoringPosition = 0;
+
+      const track = state.queue[index];
+      savePlayerSettings({
+        playerLastTrackId: track.id,
+        playerLastTrackPath: track.path,
+        playerLastPosition: 0,
+        playerLastDuration: displayDuration(track)
+      }, { immediate: true });
+
+      try {
+        await loadTrack(index, true, { restorePosition: 0 });
+      } catch {
+        Toast.show('현재 노래를 반복 재생할 수 없습니다.', 'error', 5000);
+      }
       return;
     }
 
@@ -2514,13 +2801,44 @@ const Player = (() => {
       }
       state.isSeeking = false;
     });
-    ensureListDom().list?.addEventListener('click', e => {
+    const listDom = ensureListDom().list;
+    listDom?.addEventListener('click', e => {
+      const menuButton = e.target.closest('button[data-player-action="menu"]');
+      if (menuButton) {
+        e.preventDefault();
+        e.stopPropagation();
+        const trackId = menuButton.dataset.trackId || '';
+        if (state.openMenuTrackId === trackId) {
+          closeTrackMenu();
+        } else {
+          openTrackMenu(trackId, menuButton);
+        }
+        return;
+      }
+
       const item = e.target.closest('.player-track');
       if (!item) return;
+      closeTrackMenu();
       void loadTrack(Number(item.dataset.index), true);
     });
+    listDom?.addEventListener('keydown', e => {
+      if (e.target.closest('button')) return;
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const item = e.target.closest('.player-track');
+      if (!item) return;
+      e.preventDefault();
+      closeTrackMenu();
+      void loadTrack(Number(item.dataset.index), true);
+    });
+    listDom?.addEventListener('scroll', closeTrackMenu);
+    document.addEventListener('click', e => {
+      if (e.target.closest('#player-track-context-menu') || e.target.closest('.player-track-more')) return;
+      closeTrackMenu();
+    });
+    window.addEventListener('resize', closeTrackMenu);
     el('player-search')?.addEventListener('input', e => {
       state.searchQuery = String(e.target.value || '');
+      closeTrackMenu();
       renderList();
     });
 

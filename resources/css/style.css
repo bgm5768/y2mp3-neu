@@ -1071,6 +1071,10 @@ input[type="checkbox"] {
   cursor: pointer;
   transition: background var(--transition), transform .1s;
 }
+.player-track:focus-visible {
+  outline: 2px solid rgba(167,114,255,.72);
+  outline-offset: -2px;
+}
 .player-track:hover {
   background: rgba(129,83,255,.12);
 }
@@ -1132,10 +1136,61 @@ input[type="checkbox"] {
   color: #b889ff;
 }
 .player-track-more {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
   color: #d4d9e6;
   font-size: 24px;
   line-height: 1;
-  text-align: right;
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), transform .1s;
+}
+.player-track-more:hover,
+.player-track-more[aria-expanded="true"] {
+  background: rgba(167,114,255,.18);
+  color: #f4f0ff;
+}
+.player-track-more:active {
+  transform: scale(.96);
+}
+.player-track-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 158px;
+  padding: 6px;
+  border: 1px solid rgba(104,118,154,.72);
+  border-radius: 10px;
+  background: rgba(10,17,31,.98);
+  box-shadow: 0 18px 44px rgba(0,0,0,.42);
+}
+.player-track-menu button {
+  width: 100%;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #eef2ff;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+.player-track-menu button:hover {
+  background: rgba(129,83,255,.18);
+}
+.player-track-menu button.danger {
+  color: #ff9d9d;
+}
+.player-track-menu button.danger:hover {
+  background: rgba(239,68,68,.16);
 }
 
 @keyframes vinyl-spin {
@@ -1431,10 +1486,9 @@ code {
     max-height: min(520px, 60vh);
   }
   .player-track {
-    grid-template-columns: 42px minmax(0, 1fr) 70px;
+    grid-template-columns: 42px minmax(0, 1fr) 70px 32px;
   }
-  .player-track-duration,
-  .player-track-more {
+  .player-track-duration {
     display: none;
   }
   .player-track-action {
@@ -1573,11 +1627,10 @@ code {
     grid-template-columns: 42px minmax(0, 1fr) 42px;
   }
   .player-track {
-    grid-template-columns: 34px minmax(0, 1fr) 58px;
+    grid-template-columns: 34px minmax(0, 1fr) 58px 32px;
     padding: 14px;
   }
-  .player-track-duration,
-  .player-track-more {
+  .player-track-duration {
     display: none;
   }
   .player-track-action {
@@ -1655,7 +1708,7 @@ code {
     gap: 8px;
   }
   .player-track {
-    grid-template-columns: 28px minmax(0, 1fr);
+    grid-template-columns: 28px minmax(0, 1fr) 32px;
     gap: 10px;
     padding: 13px 12px;
   }
