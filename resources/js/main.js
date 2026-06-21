@@ -50,6 +50,10 @@ let cancelRequested = false;
 let currentItemId = null;
 let isQueueRunning = false;
 let dependencyInstallPromise = null;
+let currentDepsStatus = {
+  ffmpeg: { ok: false, version: '' },
+  ytdlp: { ok: false, version: '' }
+};
 let currentUrlAnalysis = {
   valid: [],
   duplicateCount: 0,
@@ -61,26 +65,40 @@ const UI = {
   updateDepsStatus({ ffmpeg, ytdlp }) {
     const ffmpegVer = document.getElementById('ffmpeg-version');
     const ytdlpVer  = document.getElementById('ytdlp-version');
+    const ffmpegPath = document.getElementById('ffmpeg-path');
+    const ytdlpPath  = document.getElementById('ytdlp-path');
 
     if (ffmpeg) {
+      currentDepsStatus.ffmpeg = { ok: !!ffmpeg.ok, version: ffmpeg.version || '', path: ffmpeg.path || '' };
       if (ffmpegVer) {
         const ver = ffmpeg.ok ? (ffmpeg.version || '버전 확인됨') : '';
         ffmpegVer.className = `dep-version ${ffmpeg.ok ? 'status-ok' : 'status-error'}`;
-        ffmpegVer.textContent = ffmpeg.ok ? `정상 설치됨 · ${ver}` : '설치되지 않음';
+        ffmpegVer.textContent = ffmpeg.ok ? `정상 설치됨 · ${ver}` : '필수 의존성 없음 · 설치 필요';
+      }
+      if (ffmpegPath) {
+        ffmpegPath.textContent = ffmpeg.ok && ffmpeg.path ? `설치 위치: ${ffmpeg.path}` : '설치 위치: 아직 없음';
+        ffmpegPath.title = ffmpeg.path || '';
       }
     }
     if (ytdlp) {
+      currentDepsStatus.ytdlp = { ok: !!ytdlp.ok, version: ytdlp.version || '', path: ytdlp.path || '' };
       if (ytdlpVer) {
         const ver = ytdlp.ok ? (ytdlp.version || '버전 확인됨') : '';
         ytdlpVer.className = `dep-version ${ytdlp.ok ? 'status-ok' : 'status-error'}`;
-        ytdlpVer.textContent = ytdlp.ok ? `정상 설치됨 · ${ver}` : '설치되지 않음';
+        ytdlpVer.textContent = ytdlp.ok ? `정상 설치됨 · ${ver}` : '필수 의존성 없음 · 설치 필요';
+      }
+      if (ytdlpPath) {
+        ytdlpPath.textContent = ytdlp.ok && ytdlp.path ? `설치 위치: ${ytdlp.path}` : '설치 위치: 아직 없음';
+        ytdlpPath.title = ytdlp.path || '';
       }
     }
 
+    updateDependencyGate();
+
     try {
       localStorage.setItem('yt_mp3_dep_status', JSON.stringify({
-        ffmpeg: ffmpeg ? { ok: !!ffmpeg.ok, version: ffmpeg.version || '' } : null,
-        ytdlp:  ytdlp  ? { ok: !!ytdlp.ok,  version: ytdlp.version  || '' } : null
+        ffmpeg: ffmpeg ? { ok: !!ffmpeg.ok, version: ffmpeg.version || '', path: ffmpeg.path || '' } : null,
+        ytdlp:  ytdlp  ? { ok: !!ytdlp.ok,  version: ytdlp.version  || '', path: ytdlp.path || '' } : null
       }));
     } catch {}
   },
@@ -98,6 +116,51 @@ const UI = {
     return false;
   }
 };
+
+function depsReady() {
+  return !!(currentDepsStatus.ffmpeg?.ok && currentDepsStatus.ytdlp?.ok);
+}
+
+function setDependencyProgress(tool, payload, visible = true) {
+  const wrap = document.getElementById(`${tool}-install-progress`);
+  const bar = document.getElementById(`${tool}-install-bar`);
+  const text = document.getElementById(`${tool}-install-text`);
+  if (!wrap || !bar || !text) return;
+
+  const progress = typeof payload === 'object' && payload !== null
+    ? payload
+    : { message: String(payload || '') };
+  const pct = Number.isFinite(Number(progress.pct)) ? Math.max(0, Math.min(100, Number(progress.pct))) : null;
+
+  wrap.classList.toggle('hidden', !visible);
+  wrap.classList.toggle('is-indeterminate', pct === null);
+  bar.style.width = pct === null ? '35%' : `${pct}%`;
+  text.textContent = `${progress.message || '진행 중…'}${pct === null ? '' : ` · ${Math.round(pct)}%`}`;
+}
+
+function updateDependencyGate() {
+  const ready = depsReady();
+  const convertNav = document.querySelector('.nav-btn[data-tab="convert"]');
+  const summary = document.getElementById('dependency-summary');
+  const reason = '설정 > 의존성 도구에서 ffmpeg와 yt-dlp를 설치해 주세요.';
+
+  if (convertNav) {
+    convertNav.disabled = !ready;
+    convertNav.classList.toggle('is-disabled', !ready);
+    convertNav.title = ready ? '' : reason;
+    convertNav.setAttribute('aria-disabled', ready ? 'false' : 'true');
+  }
+
+  if (summary) {
+    summary.classList.toggle('status-ok', ready);
+    summary.classList.toggle('status-error', !ready);
+    summary.textContent = ready
+      ? '필수 의존성 도구가 모두 정상 설치되어 변환 기능을 사용할 수 있습니다.'
+      : reason;
+  }
+
+  updateConvertButton();
+}
 
 // ── URL parsing ────────────────────────────────────────────────────────
 function splitUrlTokens(value) {
@@ -212,6 +275,15 @@ function updateUrlAnalysisView() {
 
 function updateConvertButton() {
   const btn = document.getElementById('convert-btn');
+  if (!btn) return;
+  if (!depsReady()) {
+    btn.textContent = '의존성 도구 설치 필요';
+    btn.disabled = true;
+    btn.title = '설정 > 의존성 도구에서 ffmpeg와 yt-dlp를 설치해 주세요.';
+    return;
+  }
+  btn.title = '';
+
   const count = currentUrlAnalysis.valid.length;
 
   if (isQueueRunning) {
@@ -429,6 +501,11 @@ function clearAcceptedInput(analysis) {
 }
 
 function beginConvert() {
+  if (!depsReady()) {
+    Toast.show('설정 > 의존성 도구에서 ffmpeg와 yt-dlp를 설치해 주세요.', 'error', 6000);
+    return;
+  }
+
   if (isQueueRunning) {
     Toast.show('현재 변환이 진행 중입니다.', 'warning');
     return;
@@ -689,6 +766,11 @@ const Player = (() => {
     tracks: [],
     queue: [],
     queuePosition: -1,
+    searchQuery: '',
+    sortKey: 'title',
+    sortDirection: 'asc',
+    sortMetricLoading: false,
+    durationHydrationToken: 0,
     orderMode: 'normal',
     repeatMode: 'stop-current',
     objectUrl: '',
@@ -766,6 +848,7 @@ const Player = (() => {
     if (audio) audio.volume = volume;
     if (orderEl) orderEl.value = state.orderMode;
     if (repeatEl) repeatEl.value = state.repeatMode;
+    updateSortControls();
   }
 
   function ensureListDom() {
@@ -774,13 +857,59 @@ const Player = (() => {
     if (!el('player-summary') && tab) {
       const header = document.createElement('div');
       header.className = 'player-list-header';
+      const heading = document.createElement('div');
+      heading.className = 'player-list-heading';
       const title = document.createElement('h2');
       title.textContent = '재생 목록';
       const summary = document.createElement('p');
       summary.id = 'player-summary';
       summary.className = 'queue-summary';
       summary.textContent = '음악 파일 0개';
-      header.append(title, summary);
+      heading.append(title, summary);
+      const toolbar = document.createElement('div');
+      toolbar.className = 'player-list-toolbar';
+      const searchWrap = document.createElement('div');
+      searchWrap.className = 'player-search-wrap';
+      const searchIcon = document.createElement('span');
+      searchIcon.className = 'player-search-icon';
+      searchIcon.setAttribute('aria-hidden', 'true');
+      searchIcon.textContent = '⌕';
+      const search = document.createElement('input');
+      search.id = 'player-search';
+      search.className = 'player-search';
+      search.type = 'search';
+      search.placeholder = '재생 목록 검색';
+      search.autocomplete = 'off';
+      search.spellcheck = false;
+      searchWrap.append(searchIcon, search);
+      const tools = document.createElement('div');
+      tools.className = 'player-list-tools';
+      const sortLabel = document.createElement('label');
+      sortLabel.className = 'player-sort-label';
+      sortLabel.setAttribute('for', 'player-sort-select');
+      sortLabel.textContent = '정렬';
+      const sortSelect = document.createElement('select');
+      sortSelect.id = 'player-sort-select';
+      sortSelect.className = 'player-sort-select';
+      [
+        ['title', '제목순'],
+        ['duration', '재생시간순']
+      ].forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        sortSelect.appendChild(option);
+      });
+      const sortDir = document.createElement('button');
+      sortDir.id = 'player-sort-dir-btn';
+      sortDir.className = 'player-sort-dir-btn';
+      sortDir.type = 'button';
+      sortDir.title = '정렬 방향 변경';
+      sortDir.setAttribute('aria-label', '정렬 방향 변경');
+      sortDir.textContent = '오름차순';
+      tools.append(sortLabel, sortSelect, sortDir);
+      toolbar.append(searchWrap, tools);
+      header.append(heading, toolbar);
       tab.appendChild(header);
     }
 
@@ -895,7 +1024,16 @@ const Player = (() => {
       ? Math.floor(((12 * bitrate / sampleRate) + padding) * 4)
       : Math.floor(((version === 1 && layer === 3 ? 144 : 72) * bitrate / sampleRate) + padding);
 
-    return { bitrate, sampleRate, frameLength, offset };
+    return {
+      bitrate,
+      sampleRate,
+      frameLength,
+      offset,
+      version,
+      layer,
+      channelMode: (b4 >> 6) & 0x03,
+      samplesPerFrame: layer === 1 ? 384 : (layer === 3 && version !== 1 ? 576 : 1152)
+    };
   }
 
   function findMp3FrameInBytes(bytes, start = 0) {
@@ -928,7 +1066,8 @@ const Player = (() => {
 
       audioStart += firstFrame.offset;
       const audioBytes = Math.max(0, totalSize - audioStart);
-      const duration = audioBytes > 0 ? (audioBytes * 8) / firstFrame.bitrate : 0;
+      const vbrDuration = mp3VbrDuration(scan, firstFrame);
+      const duration = vbrDuration || (audioBytes > 0 ? (audioBytes * 8) / firstFrame.bitrate : 0);
       if (!Number.isFinite(duration) || duration <= 0) throw new Error('MP3 재생시간을 계산할 수 없습니다.');
       track.streamInfo = {
         audioStart,
@@ -1170,7 +1309,7 @@ const Player = (() => {
         return;
       } catch {
         clearAudioSource(audio);
-        if (Number(track.size) > 64 * 1024 * 1024) {
+        if (Number(track.size) > 512 * 1024 * 1024) {
           throw new Error('스트리밍 재생을 시작할 수 없습니다.');
         }
       }
@@ -1204,7 +1343,8 @@ const Player = (() => {
     if (track && savedDuration > 0 && (track.id === savedId || track.path.toLowerCase() === savedPath)) {
       return savedDuration;
     }
-    return audio && Number.isFinite(audio.duration) ? audio.duration : 0;
+    const current = currentTrack();
+    return audio && track && current && track.id === current.id && Number.isFinite(audio.duration) ? audio.duration : 0;
   }
 
   function displayCurrentTime() {
@@ -1226,6 +1366,17 @@ const Player = (() => {
       (bytes[offset + 1] << 16) |
       (bytes[offset + 2] << 8) |
       bytes[offset + 3];
+  }
+
+  function uint32le(bytes, offset = 0) {
+    return (bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24)) >>> 0;
+  }
+
+  function uint64beNumber(bytes, offset = 0) {
+    return uint32be(bytes, offset) * 4294967296 + uint32be(bytes, offset + 4);
   }
 
   function decodeLatin1(bytes) {
@@ -1442,8 +1593,191 @@ const Player = (() => {
     return result;
   }
 
+  function mp3VbrDuration(scan, frame) {
+    const sideInfoSize = frame.layer === 3
+      ? (frame.version === 1 ? (frame.channelMode === 3 ? 17 : 32) : (frame.channelMode === 3 ? 9 : 17))
+      : 0;
+    const xingOffset = frame.offset + 4 + sideInfoSize;
+    const id = decodeLatin1(scan.slice(xingOffset, xingOffset + 4));
+    if (id === 'Xing' || id === 'Info') {
+      const flags = uint32be(scan, xingOffset + 4);
+      if (flags & 0x01) {
+        const frames = uint32be(scan, xingOffset + 8);
+        if (frames > 0) return (frames * frame.samplesPerFrame) / frame.sampleRate;
+      }
+    }
+
+    const vbriOffset = frame.offset + 36;
+    if (decodeLatin1(scan.slice(vbriOffset, vbriOffset + 4)) === 'VBRI') {
+      const frames = uint32be(scan, vbriOffset + 14);
+      if (frames > 0) return (frames * frame.samplesPerFrame) / frame.sampleRate;
+    }
+    return 0;
+  }
+
+  function mp4DurationFromBytes(bytes) {
+    for (let i = 4; i + 32 < bytes.length; i += 1) {
+      if (decodeLatin1(bytes.slice(i, i + 4)) !== 'mvhd') continue;
+      const version = bytes[i + 4];
+      const timescale = version === 1 ? uint32be(bytes, i + 24) : uint32be(bytes, i + 16);
+      const duration = version === 1 ? uint64beNumber(bytes, i + 28) : uint32be(bytes, i + 20);
+      if (timescale > 0 && duration > 0) return duration / timescale;
+    }
+    return 0;
+  }
+
+  async function getMp4Duration(track) {
+    if (track.streamInfo && !track.streamInfo.estimated) return track.streamInfo.duration || 0;
+    const totalSize = Number(track.size) || Number((await Neutralino.filesystem.getStats(track.path)).size) || 0;
+    const readSize = Math.min(totalSize, 8 * 1024 * 1024);
+    const chunks = [];
+    if (readSize > 0) {
+      chunks.push(new Uint8Array(await Neutralino.filesystem.readBinaryFile(track.path, { pos: 0, size: readSize })));
+    }
+    if (totalSize > readSize) {
+      chunks.push(new Uint8Array(await Neutralino.filesystem.readBinaryFile(track.path, { pos: Math.max(0, totalSize - readSize), size: readSize })));
+    }
+
+    for (const chunk of chunks) {
+      const duration = mp4DurationFromBytes(chunk);
+      if (duration > 0) {
+        track.streamInfo = { ...(track.streamInfo || {}), duration, totalSize };
+        return duration;
+      }
+    }
+    return 0;
+  }
+
+  async function getWavDuration(track) {
+    if (track.streamInfo && !track.streamInfo.estimated) return track.streamInfo.duration || 0;
+    const totalSize = Number(track.size) || Number((await Neutralino.filesystem.getStats(track.path)).size) || 0;
+    const readSize = Math.min(totalSize, 256 * 1024);
+    const bytes = new Uint8Array(await Neutralino.filesystem.readBinaryFile(track.path, { pos: 0, size: readSize }));
+    if (decodeLatin1(bytes.slice(0, 4)) !== 'RIFF' || decodeLatin1(bytes.slice(8, 12)) !== 'WAVE') return 0;
+
+    let offset = 12;
+    let byteRate = 0;
+    let dataSize = 0;
+    while (offset + 8 <= bytes.length) {
+      const id = decodeLatin1(bytes.slice(offset, offset + 4));
+      const size = uint32le(bytes, offset + 4);
+      const dataOffset = offset + 8;
+      if (id === 'fmt ' && dataOffset + 16 <= bytes.length) {
+        byteRate = uint32le(bytes, dataOffset + 8);
+      } else if (id === 'data') {
+        dataSize = size || Math.max(0, totalSize - dataOffset);
+        break;
+      }
+      offset = dataOffset + size + (size % 2);
+    }
+    const duration = byteRate > 0 && dataSize > 0 ? dataSize / byteRate : 0;
+    if (duration > 0) track.streamInfo = { ...(track.streamInfo || {}), duration, totalSize };
+    return duration;
+  }
+
+  async function getFlacDuration(track) {
+    if (track.streamInfo && !track.streamInfo.estimated) return track.streamInfo.duration || 0;
+    const totalSize = Number(track.size) || Number((await Neutralino.filesystem.getStats(track.path)).size) || 0;
+    const bytes = new Uint8Array(await Neutralino.filesystem.readBinaryFile(track.path, { pos: 0, size: Math.min(totalSize, 128 * 1024) }));
+    if (decodeLatin1(bytes.slice(0, 4)) !== 'fLaC') return 0;
+    let offset = 4;
+    while (offset + 4 <= bytes.length) {
+      const type = bytes[offset] & 0x7f;
+      const length = (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
+      const dataOffset = offset + 4;
+      if (type === 0 && length >= 34 && dataOffset + 18 <= bytes.length) {
+        const sampleRate = (bytes[dataOffset + 10] << 12) | (bytes[dataOffset + 11] << 4) | (bytes[dataOffset + 12] >> 4);
+        const highSamples = bytes[dataOffset + 13] & 0x0f;
+        const lowSamples = uint32be(bytes, dataOffset + 14);
+        const totalSamples = highSamples * 4294967296 + lowSamples;
+        const duration = sampleRate > 0 && totalSamples > 0 ? totalSamples / sampleRate : 0;
+        if (duration > 0) track.streamInfo = { ...(track.streamInfo || {}), duration, totalSize };
+        return duration;
+      }
+      offset = dataOffset + length;
+    }
+    return 0;
+  }
+
+  async function ensureTrackDuration(track) {
+    if (!track || displayDuration(track)) return displayDuration(track);
+    try {
+      if (/\.mp3$/i.test(track.path)) {
+        const info = await getMp3StreamInfo(track);
+        return Number(info.duration) || 0;
+      }
+      if (/\.(m4a|mp4|aac)$/i.test(track.path)) {
+        return await getMp4Duration(track);
+      }
+      if (/\.wav$/i.test(track.path)) {
+        return await getWavDuration(track);
+      }
+      if (/\.flac$/i.test(track.path)) {
+        return await getFlacDuration(track);
+      }
+    } catch {}
+    return 0;
+  }
+
+  function trackSortValue(track, key) {
+    switch (key) {
+      case 'title':
+        return String(track.title || track.fileName || '').toLocaleLowerCase();
+      case 'duration':
+        return Number(displayDuration(track)) || Number.MAX_SAFE_INTEGER;
+      default:
+        return String(track.title || track.fileName || '').toLocaleLowerCase();
+    }
+  }
+
+  function sortTracks(list) {
+    if (state.orderMode === 'shuffle') return shuffle(list);
+    const direction = state.sortDirection === 'desc' ? -1 : 1;
+    const key = state.sortKey || 'title';
+    return [...list].sort((a, b) => {
+      const av = trackSortValue(a, key);
+      const bv = trackSortValue(b, key);
+      if (key === 'duration') {
+        const aMissing = av === Number.MAX_SAFE_INTEGER;
+        const bMissing = bv === Number.MAX_SAFE_INTEGER;
+        if (aMissing !== bMissing) return aMissing ? 1 : -1;
+      }
+      if (typeof av === 'string' || typeof bv === 'string') {
+        const result = String(av).localeCompare(String(bv), 'ko', { numeric: true, sensitivity: 'base' });
+        return result * direction;
+      }
+      if (av === bv) {
+        return String(a.title || '').localeCompare(String(b.title || ''), 'ko', { numeric: true, sensitivity: 'base' });
+      }
+      return (av > bv ? 1 : -1) * direction;
+    });
+  }
+
+  async function hydrateTrackDurations() {
+    const token = ++state.durationHydrationToken;
+    state.sortMetricLoading = true;
+    try {
+      const tracks = [...state.tracks];
+      for (const track of tracks) {
+        if (token !== state.durationHydrationToken) return;
+        await ensureTrackDuration(track);
+        if (token !== state.durationHydrationToken) return;
+        if (state.sortKey === 'duration') {
+          rebuildQueue();
+        }
+        renderList();
+      }
+    } finally {
+      if (token === state.durationHydrationToken) {
+        state.sortMetricLoading = false;
+        rebuildQueue();
+        renderList();
+      }
+    }
+  }
+
   function rebuildQueue(preserveTrackId = currentTrack()?.id || '') {
-    state.queue = state.orderMode === 'shuffle' ? shuffle(state.tracks) : [...state.tracks];
+    state.queue = sortTracks(state.tracks);
     state.queuePosition = preserveTrackId
       ? state.queue.findIndex(track => track.id === preserveTrackId)
       : (state.queue.length ? 0 : -1);
@@ -1584,15 +1918,31 @@ const Player = (() => {
       rebuildQueue();
     }
 
-    if (empty) empty.classList.toggle('hidden', state.tracks.length > 0);
+    const visibleTracks = state.queue.length ? state.queue : state.tracks;
+    const query = state.searchQuery.trim().toLowerCase();
+    const filteredTracks = visibleTracks
+      .map((track, index) => ({ track, index }))
+      .filter(({ track }) => {
+        if (!query) return true;
+        return [track.title, track.fileName]
+          .some(value => String(value || '').toLowerCase().includes(query));
+      });
+
+    if (empty) {
+      empty.classList.toggle('hidden', state.tracks.length > 0 && filteredTracks.length > 0);
+      empty.textContent = state.tracks.length
+        ? '검색 결과가 없습니다.'
+        : '현재 저장 위치에서 재생 가능한 음악 파일을 찾지 못했습니다.';
+    }
     if (summary) {
+      const orderText = state.orderMode === 'shuffle' ? '셔플 순서' : '원래 순서';
+      const sortText = `${sortLabel()} · ${sortDirectionLabel()}`;
       summary.textContent = state.tracks.length
-        ? `음악 파일 ${state.tracks.length}개 · ${state.orderMode === 'shuffle' ? '셔플 순서' : '원래 순서'}`
+        ? (query ? `검색 결과 ${filteredTracks.length}개 · 전체 ${state.tracks.length}개 · ${sortText}` : `음악 파일 ${state.tracks.length}개 · ${sortText}`)
         : '음악 파일 0개';
     }
 
-    const visibleTracks = state.queue.length ? state.queue : state.tracks;
-    visibleTracks.forEach((track, index) => {
+    filteredTracks.forEach(({ track, index }) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = `player-track ${index === state.queuePosition ? 'active' : ''}`;
@@ -1614,7 +1964,7 @@ const Player = (() => {
 
       const duration = document.createElement('span');
       duration.className = 'player-track-duration';
-      duration.textContent = index === state.queuePosition && displayDuration(track)
+      duration.textContent = displayDuration(track)
         ? formatTime(displayDuration(track))
         : '';
 
@@ -1779,6 +2129,7 @@ const Player = (() => {
       state.loadedPath = loadedPath;
       rebuildQueue(currentId);
       render();
+      void hydrateTrackDurations();
       if (!currentId) {
         await restoreLastTrackIfNeeded();
       }
@@ -2015,6 +2366,37 @@ const Player = (() => {
     savePlayerSettings({ playerRepeatMode: mode }, { immediate: true });
   }
 
+  function sortLabel() {
+    return ({
+      title: '제목순',
+      duration: '재생시간순'
+    })[state.sortKey] || '제목순';
+  }
+
+  function sortDirectionLabel() {
+    return state.sortDirection === 'desc' ? '내림차순' : '오름차순';
+  }
+
+  function updateSortControls() {
+    const select = el('player-sort-select');
+    const button = el('player-sort-dir-btn');
+    if (select) select.value = state.sortKey;
+    if (button) {
+      button.textContent = sortDirectionLabel();
+      button.title = `${sortLabel()} ${sortDirectionLabel()}`;
+      button.setAttribute('aria-label', `정렬 방향: ${sortDirectionLabel()}`);
+    }
+  }
+
+  function applyListSort(nextKey = state.sortKey, nextDirection = state.sortDirection) {
+    state.sortKey = nextKey;
+    state.sortDirection = nextDirection;
+    rebuildQueue();
+    updateSortControls();
+    render();
+    if (state.sortKey === 'duration') void hydrateTrackDurations();
+  }
+
   function invalidate() {
     const activePath = String(Settings.getActiveSavePath() || '').trim();
     const loadedPath = String(state.loadedPath || '').trim();
@@ -2085,6 +2467,10 @@ const Player = (() => {
     el('player-next-btn')?.addEventListener('click', () => void next());
     el('player-order-select')?.addEventListener('change', e => setOrderMode(e.target.value));
     el('player-repeat-select')?.addEventListener('change', e => setRepeatMode(e.target.value));
+    el('player-sort-select')?.addEventListener('change', e => applyListSort(e.target.value, state.sortDirection));
+    el('player-sort-dir-btn')?.addEventListener('click', () => {
+      applyListSort(state.sortKey, state.sortDirection === 'desc' ? 'asc' : 'desc');
+    });
     volume?.addEventListener('input', e => {
       const value = Number(e.target.value);
       if (audio) audio.volume = value;
@@ -2133,6 +2519,10 @@ const Player = (() => {
       if (!item) return;
       void loadTrack(Number(item.dataset.index), true);
     });
+    el('player-search')?.addEventListener('input', e => {
+      state.searchQuery = String(e.target.value || '');
+      renderList();
+    });
 
     render();
   }
@@ -2178,6 +2568,10 @@ function handleQueueAction(event) {
 function initTabs() {
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+      if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') {
+        Toast.show('설정 > 의존성 도구에서 ffmpeg와 yt-dlp를 설치해 주세요.', 'error', 5000);
+        return;
+      }
       const tab = btn.dataset.tab;
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
@@ -2260,11 +2654,17 @@ function initSettingsTab() {
     const btn = document.getElementById('install-ffmpeg-btn');
     btn.disabled = true;
     btn.textContent = '설치 중…';
+    setDependencyProgress('ffmpeg', { pct: 0, message: '다운로드 준비 중…' }, true);
     try {
-      const deps = await YTDlp.installFfmpeg(msg => Toast.show(msg, 'info', 5000));
+      const deps = await YTDlp.installFfmpeg(progress => {
+        setDependencyProgress('ffmpeg', progress, true);
+        if (typeof progress === 'string') Toast.show(progress, 'info', 5000);
+      });
       UI.updateDepsStatus(deps);
+      setDependencyProgress('ffmpeg', { pct: 100, message: '정상 설치 완료' }, true);
       Toast.show(`ffmpeg ${deps.ffmpeg.version} 준비 완료`, 'success', 5000);
     } catch (e) {
+      setDependencyProgress('ffmpeg', { pct: 100, message: `설치 실패: ${e.message || e}` }, true);
       Toast.show(`ffmpeg 설치 실패: ${e.message || e}`, 'error', 8000);
     } finally {
       btn.disabled = false;
@@ -2276,11 +2676,17 @@ function initSettingsTab() {
     const btn = document.getElementById('update-ytdlp-btn');
     btn.disabled = true;
     btn.textContent = '설치 중…';
+    setDependencyProgress('ytdlp', { pct: 0, message: '다운로드 준비 중…' }, true);
     try {
-      const deps = await YTDlp.updateYtdlp(msg => Toast.show(msg, 'info', 5000));
+      const deps = await YTDlp.updateYtdlp(progress => {
+        setDependencyProgress('ytdlp', progress, true);
+        if (typeof progress === 'string') Toast.show(progress, 'info', 5000);
+      });
       UI.updateDepsStatus(deps);
+      setDependencyProgress('ytdlp', { pct: 100, message: '정상 설치 완료' }, true);
       Toast.show(`yt-dlp ${deps.ytdlp.version} 준비 완료`, 'success', 5000);
     } catch (e) {
+      setDependencyProgress('ytdlp', { pct: 100, message: `설치 실패: ${e.message || e}` }, true);
       Toast.show(`yt-dlp 설치 실패: ${e.message || e}`, 'error', 8000);
     } finally {
       btn.disabled = false;
@@ -2328,26 +2734,23 @@ async function ensureRequiredToolsInstalled() {
 
   dependencyInstallPromise = (async () => {
     Toast.show('ffmpeg / yt-dlp 확인 중…', 'info', 2500);
-    let deps = await YTDlp.checkDeps({ refresh: true });
-    UI.updateDepsStatus(deps);
+    setDependencyProgress('ffmpeg', null, false);
+    setDependencyProgress('ytdlp', null, false);
 
-    if (!deps.ffmpeg.ok) {
-      Toast.show('ffmpeg가 없어 자동 설치를 시작합니다.', 'warning', 6000);
-      deps = await YTDlp.installFfmpeg(msg => Toast.show(msg, 'info', 5000));
-      UI.updateDepsStatus(deps);
+    let deps;
+    try {
+      deps = await YTDlp.checkDeps({ refresh: true });
+    } catch (e) {
+      deps = {
+        ffmpeg: { ok: false, path: '', version: '' },
+        ytdlp: { ok: false, path: '', version: '' }
+      };
+      Toast.show(`필수 도구 확인 실패: ${e.message || e}`, 'error', 8000);
     }
-
-    if (!deps.ytdlp.ok) {
-      Toast.show('yt-dlp가 없어 자동 설치를 시작합니다.', 'warning', 6000);
-      deps = await YTDlp.installYtdlp(msg => Toast.show(msg, 'info', 5000));
-      UI.updateDepsStatus(deps);
-    }
-
-    deps = await YTDlp.checkDeps({ refresh: true });
     UI.updateDepsStatus(deps);
 
     if (!deps.ffmpeg.ok || !deps.ytdlp.ok) {
-      throw new Error('ffmpeg 또는 yt-dlp 실행 파일을 준비하지 못했습니다.');
+      Toast.show('변환 기능을 사용하려면 설정 > 의존성 도구에서 필수 도구를 설치해 주세요.', 'warning', 8000);
     }
 
     return deps;
@@ -2377,6 +2780,6 @@ Neutralino.events.on('windowClose', () => Neutralino.app.exit());
   void Player.loadLibrary({ force: true });
 
   void ensureRequiredToolsInstalled().catch(e => {
-    Toast.show(`필수 도구 자동 설치 실패: ${e.message || e}`, 'error', 8000);
+    Toast.show(`필수 도구 확인 실패: ${e.message || e}`, 'error', 8000);
   });
 })();

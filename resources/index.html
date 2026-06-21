@@ -97,8 +97,33 @@
       </div>
 
       <div class="player-list-header">
-        <h2>♫ 재생 목록</h2>
-        <p id="player-summary" class="queue-summary">음악 파일 0개</p>
+        <div class="player-list-heading">
+          <h2>♫ 재생 목록</h2>
+          <p id="player-summary" class="queue-summary">음악 파일 0개</p>
+        </div>
+        <div class="player-list-toolbar">
+          <div class="player-search-wrap">
+            <span class="player-search-icon" aria-hidden="true">⌕</span>
+            <input
+              id="player-search"
+              class="player-search"
+              type="search"
+              placeholder="재생 목록 검색"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <div class="player-list-tools">
+            <label class="player-sort-label" for="player-sort-select">↕ 정렬</label>
+            <select id="player-sort-select" class="player-sort-select">
+              <option value="title">제목순</option>
+              <option value="duration">재생시간순</option>
+            </select>
+            <button id="player-sort-dir-btn" class="player-sort-dir-btn" type="button" title="정렬 방향 변경" aria-label="정렬 방향 변경">
+              오름차순
+            </button>
+          </div>
+        </div>
       </div>
       <div id="player-empty" class="queue-empty hidden">
         현재 저장 위치에서 재생 가능한 음악 파일을 찾지 못했습니다.
@@ -223,11 +248,21 @@
       <!-- ffmpeg / yt-dlp -->
       <div class="card settings-card">
         <h2 class="settings-section-title">🔧 의존성 도구</h2>
+        <p id="dependency-summary" class="settings-desc dep-summary">
+          ffmpeg와 yt-dlp는 YouTube 변환에 필요한 필수 의존성 도구입니다.
+        </p>
 
         <div class="dep-row">
           <div class="dep-info">
             <strong>ffmpeg</strong>
             <span id="ffmpeg-version" class="dep-version">확인 중…</span>
+            <span id="ffmpeg-path" class="dep-path">설치 위치 확인 전</span>
+            <div id="ffmpeg-install-progress" class="dep-progress hidden">
+              <div class="dep-progress-track">
+                <div id="ffmpeg-install-bar" class="dep-progress-bar"></div>
+              </div>
+              <span id="ffmpeg-install-text" class="dep-progress-text">대기 중</span>
+            </div>
           </div>
           <button id="install-ffmpeg-btn" class="btn btn-secondary btn-sm">⬇ 설치 / 업데이트</button>
         </div>
@@ -236,6 +271,13 @@
           <div class="dep-info">
             <strong>yt-dlp</strong>
             <span id="ytdlp-version" class="dep-version">확인 중…</span>
+            <span id="ytdlp-path" class="dep-path">설치 위치 확인 전</span>
+            <div id="ytdlp-install-progress" class="dep-progress hidden">
+              <div class="dep-progress-track">
+                <div id="ytdlp-install-bar" class="dep-progress-bar"></div>
+              </div>
+              <span id="ytdlp-install-text" class="dep-progress-text">대기 중</span>
+            </div>
           </div>
           <button id="update-ytdlp-btn" class="btn btn-secondary btn-sm">⬇ 업데이트</button>
         </div>
