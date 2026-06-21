@@ -18,7 +18,14 @@ const Settings = (() => {
     proxy:       '',
     useProxy:    false,
     rateLimit:   '',
-    useRateLimit: false
+    useRateLimit: false,
+    playerVolume: 0.9,
+    playerOrderMode: 'normal',
+    playerRepeatMode: 'stop-current',
+    playerLastTrackId: '',
+    playerLastTrackPath: '',
+    playerLastPosition: 0,
+    playerLastDuration: 0
   };
 
   let current = { ...defaults };

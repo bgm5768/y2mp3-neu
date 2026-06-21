@@ -14,9 +14,12 @@
     </div>
 
     <nav class="nav">
-      <button class="nav-btn active" data-tab="convert">
-        <span class="nav-icon">⬇️</span> 변환
+      <button class="nav-btn active" data-tab="player">
+        <span class="nav-icon">▶</span> 플레이어
       </button>
+        <button class="nav-btn" data-tab="convert">
+          <span class="nav-icon">⬇️</span> 변환
+        </button>
       <button class="nav-btn" data-tab="settings">
         <span class="nav-icon">⚙️</span> 설정
       </button>
@@ -35,8 +38,90 @@
   <!-- ── MAIN ──────────────────────────────────────── -->
   <main class="main">
 
+
+    <!-- ===== TAB: PLAYER ===== -->
+    <section id="tab-player" class="tab active">
+      <div class="page-header">
+        <div>
+          <h1><span class="player-title-icon">♪</span> 음악 플레이어</h1>
+          <p id="player-path" class="subtitle">현재 저장 위치의 음악 파일을 불러옵니다.</p>
+        </div>
+        <div class="header-actions">
+          <!--<button id="player-refresh-btn" class="btn btn-secondary btn-sm">↻ 목록 새로고침</button> -->
+          <button id="player-open-folder-btn" class="btn btn-ghost btn-sm">▣ 저장 폴더 열기</button>
+        </div>
+      </div>
+
+      <div class="card player-card is-loading">
+        <div class="player-showcase">
+          <div class="player-cover-stage">
+            <div id="player-art" class="player-art" aria-hidden="true">♪</div>
+            <div class="player-vinyl" aria-hidden="true"></div>
+          </div>
+
+          <div class="player-info">
+            <span id="player-status-pill" class="player-status-pill">대기 중</span>
+            <p id="player-title" class="player-title">재생할 음악을 선택하세요</p>
+            <p id="player-subtitle" class="player-subtitle">저장 폴더의 음악 파일이 이곳에 표시됩니다.</p>
+            <div id="player-metadata" class="player-metadata hidden"></div>
+
+            <div class="player-progress-row">
+              <span id="player-current-time">0:00</span>
+              <input id="player-seek" class="player-seek" type="range" min="0" max="100" value="0" step="0.1" />
+              <span id="player-duration">0:00</span>
+            </div>
+
+            <div class="player-transport">
+              <button id="player-prev-btn" class="player-icon-btn" aria-label="이전 곡">◀</button>
+              <button id="player-play-btn" class="player-play-main">▶</button>
+              <button id="player-next-btn" class="player-icon-btn" aria-label="다음 곡">▶</button>
+
+              <label class="player-volume-control" aria-label="볼륨">
+                <span>🔈</span>
+                <input id="player-volume" class="player-volume" type="range" min="0" max="1" value="0.9" step="0.01" />
+                <span>🔊</span>
+              </label>
+            </div>
+
+            <div class="player-controls">
+              <label class="option-label player-option">
+                재생 순서
+                <select id="player-order-select" class="select">
+                  <option value="normal">원래 순서대로 재생</option>
+                  <option value="shuffle">셔플 새로운 순서대로 재생</option>
+                </select>
+              </label>
+
+              <label class="option-label player-option">
+                반복/종료 동작
+                <select id="player-repeat-select" class="select">
+                  <option value="stop-current">현재 노래가 끝나면 재생 중지</option>
+                  <option value="repeat-one">현재 노래 반복 재생</option>
+                  <option value="play-through">대기열이 끝날 때까지 다음 노래 자동 재생</option>
+                  <option value="repeat-queue">다음 노래 및 반복 대기열 자동 재생</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <audio id="audio-player" preload="metadata"></audio>
+      </div>
+
+      <div class="player-list-header">
+        <h2>♫ 재생 목록</h2>
+        <p id="player-summary" class="queue-summary">음악 파일 0개</p>
+      </div>
+      <div id="player-empty" class="queue-empty hidden">
+        현재 저장 위치에서 재생 가능한 음악 파일을 찾지 못했습니다.
+      </div>
+      <div id="player-list" class="player-list">
+        <!-- Player tracks injected by JS -->
+      </div>
+    </section>
+
     <!-- ===== TAB: CONVERT ===== -->
-    <section id="tab-convert" class="tab active">
+    <section id="tab-convert" class="tab">
       <div class="page-header">
         <h1>MP3 변환기</h1>
         <p class="subtitle">URL 개수에 따라 단일 또는 다중 변환으로 자동 처리됩니다.</p>

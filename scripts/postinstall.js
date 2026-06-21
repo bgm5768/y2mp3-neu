@@ -7,6 +7,7 @@
 
 const path   = require('path');
 const fs     = require('fs');
+const fse    = require('fs-extra');
 const https  = require('https');
 const { execFile } = require('child_process');
 

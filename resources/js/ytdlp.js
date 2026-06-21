@@ -39,48 +39,80 @@ const YTDlp = (() => {
   // ────────────────────────────────────────────────────────────────
   //  실행 파일 경로 확인
   // ────────────────────────────────────────────────────────────────
-  async function ytdlpExe() {
-    if (_cache.ytdlp) return _cache.ytdlp;
+  async function ytdlpCandidates() {
     const root = getRoot();
-    const candidates = [
+    const runtimeYtdlp = await ytdlpInstallPath().catch(() => '');
+    return [
+      runtimeYtdlp,
       `${root}\\resources\\bin\\yt-dlp.exe`,
       `${root}\\bin\\yt-dlp.exe`,
       `yt-dlp.exe`
-    ];
-    for (const p of candidates) {
-      try {
-        const r = await runCmd(`"${p}" --version`);
-        if (r.exitCode === 0 || (r.stdOut || '').trim()) {
-          _cache.ytdlp = p;
-          return p;
-        }
-      } catch (e) { /* 다음 후보 시도 */ }
-    }
-    _cache.ytdlp = candidates[0];
-    return candidates[0];
+    ].filter(Boolean);
   }
 
-  async function ffmpegExe() {
-    if (_cache.ffmpeg) return _cache.ffmpeg;
+  async function ffmpegCandidates() {
     const root = getRoot();
-    const candidates = [
+    const runtimeFfmpeg = await ffmpegInstallPath().catch(() => '');
+    return [
+      runtimeFfmpeg,
       `${root}\\resources\\bin\\ffmpeg.exe`,
       `${root}\\node_modules\\ffmpeg-static\\ffmpeg.exe`,
       `${root}\\bin\\ffmpeg.exe`,
       `ffmpeg`
-    ];
+    ].filter(Boolean);
+  }
+
+  async function probeYtdlp() {
+    const candidates = await ytdlpCandidates();
+    for (const p of candidates) {
+      try {
+        const r = await runCmd(`"${p}" --version`);
+        const version = ((r.stdOut || '') + (r.stdErr || '')).trim();
+        if (r.exitCode === 0 && version) {
+          _cache.ytdlp = p;
+          return { ok: true, path: p, version };
+        }
+      } catch (e) { /* 다음 후보 시도 */ }
+    }
+    return { ok: false, path: candidates[0] || '', version: '' };
+  }
+
+  async function probeFfmpeg() {
+    const candidates = await ffmpegCandidates();
     for (const p of candidates) {
       try {
         const r = await runCmd(`"${p}" -version`);
         const out = (r.stdOut || '') + (r.stdErr || '');
+        const m = out.match(/ffmpeg version ([\S]+)/i);
         if (out.includes('ffmpeg version')) {
           _cache.ffmpeg = p;
-          return p;
+          return { ok: true, path: p, version: m ? m[1] : '(설치됨)' };
         }
       } catch (e) { /* 다음 후보 시도 */ }
     }
-    _cache.ffmpeg = candidates[0];
-    return candidates[0];
+    return { ok: false, path: candidates[0] || '', version: '' };
+  }
+
+  async function ytdlpExe() {
+    if (_cache.ytdlp) return _cache.ytdlp;
+    let found = await probeYtdlp();
+    if (!found.ok) {
+      await installYtdlp();
+      found = await probeYtdlp();
+    }
+    if (!found.ok) throw new Error('yt-dlp 실행 파일을 준비하지 못했습니다.');
+    return found.path;
+  }
+
+  async function ffmpegExe() {
+    if (_cache.ffmpeg) return _cache.ffmpeg;
+    let found = await probeFfmpeg();
+    if (!found.ok) {
+      await installFfmpeg();
+      found = await probeFfmpeg();
+    }
+    if (!found.ok) throw new Error('ffmpeg 실행 파일을 준비하지 못했습니다.');
+    return found.path;
   }
 
   async function tempWorkDir() {
@@ -96,6 +128,32 @@ const YTDlp = (() => {
     const fallback = `${getRoot()}\\.tmp`;
     try { await Neutralino.filesystem.createDirectory(fallback); } catch {}
     return fallback;
+  }
+
+  async function runtimeBinDir() {
+    const pathNames = ['data', 'cache'];
+    for (const name of pathNames) {
+      try {
+        const base = await Neutralino.os.getPath(name);
+        if (base) {
+          const dir = `${base}\\yt-mp3-converter\\bin`;
+          try { await Neutralino.filesystem.createDirectory(dir); } catch {}
+          return dir;
+        }
+      } catch {}
+    }
+
+    const fallback = `${getRoot()}\\.tmp\\bin`;
+    try { await Neutralino.filesystem.createDirectory(fallback); } catch {}
+    return fallback;
+  }
+
+  async function ffmpegInstallPath() {
+    return `${await runtimeBinDir()}\\ffmpeg.exe`;
+  }
+
+  async function ytdlpInstallPath() {
+    return `${await runtimeBinDir()}\\yt-dlp.exe`;
   }
 
   async function cleanupTempScripts(dir) {
@@ -142,6 +200,10 @@ const YTDlp = (() => {
   // ────────────────────────────────────────────────────────────────
   async function checkDeps(opts = {}) {
     const refresh = !!opts.refresh;
+    if (refresh) {
+      _cache.ffmpeg = null;
+      _cache.ytdlp = null;
+    }
     if (!refresh && _cache.deps && _cache.depsAt && (Date.now() - _cache.depsAt) < 5 * 60 * 1000) {
       return _cache.deps;
     }
@@ -150,22 +212,11 @@ const YTDlp = (() => {
       ytdlp:  { ok: false, version: '' }
     };
 
-    try {
-      const ff = await ffmpegExe();
-      const r = await runCmd(`"${ff}" -version`);
-      const out = (r.stdOut || '') + (r.stdErr || '');
-      const m = out.match(/ffmpeg version ([\S]+)/i);
-      if (m || out.includes('ffmpeg')) {
-        result.ffmpeg = { ok: true, version: m ? m[1] : '(번들)' };
-      }
-    } catch (e) { /* ignored */ }
+    const ff = await probeFfmpeg();
+    if (ff.ok) result.ffmpeg = { ok: true, version: ff.version || '(설치됨)' };
 
-    try {
-      const yd = await ytdlpExe();
-      const r = await runCmd(`"${yd}" --version`);
-      const ver = ((r.stdOut || '') + (r.stdErr || '')).trim();
-      if (ver) result.ytdlp = { ok: true, version: ver };
-    } catch (e) { /* ignored */ }
+    const yd = await probeYtdlp();
+    if (yd.ok) result.ytdlp = { ok: true, version: yd.version };
 
     _cache.deps = result;
     _cache.depsAt = Date.now();
@@ -517,20 +568,127 @@ const YTDlp = (() => {
   //  yt-dlp 업데이트
   // ────────────────────────────────────────────────────────────────
   async function updateYtdlp(onMessage) {
+    return installYtdlp(onMessage);
+  }
+
+  async function installYtdlp(onMessage = () => {}) {
     const url  = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
-    const dest = await ytdlpExe();
-    onMessage('GitHub에서 yt-dlp 다운로드 중…');
+    const dest = await ytdlpInstallPath();
+    const tempDir = await tempWorkDir();
+    const scriptPath = `${tempDir}\\install_ytdlp_${Date.now()}.ps1`;
+    const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
+    const scriptContent = [
+      "$ErrorActionPreference = 'Stop'",
+      "$ProgressPreference = 'SilentlyContinue'",
+      `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
+      `$url = ${psQuote(url)}`,
+      `$dest = ${psQuote(dest)}`,
+      `New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null`,
+      `Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing`,
+      `& $dest --version | Out-Null`,
+      `Write-Output "yt-dlp installed: $dest"`
+    ].join('\r\n');
+
+    onMessage('yt-dlp 다운로드 준비 중…');
     try {
-      const r = await runCmd(
-        `powershell -Command "Invoke-WebRequest -Uri '${url}' -OutFile '${dest}'"`,
-        false
-      );
-      _cache.ytdlp = null; // 캐시 무효화
+      await Neutralino.filesystem.writeFile(scriptPath, scriptContent);
+      onMessage('yt-dlp 다운로드 중…');
+      const r = await runCmd(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, false);
+      if (r.exitCode !== 0) {
+        const output = `${r.stdOut || ''}\n${r.stdErr || ''}`.trim();
+        throw new Error(output || `PowerShell 종료 코드 ${r.exitCode}`);
+      }
+
+      _cache.ytdlp = null;
       _cache.deps = null;
       _cache.depsAt = 0;
-      onMessage(r.exitCode === 0 ? '✅ yt-dlp 업데이트 완료!' : `❌ 실패 (코드 ${r.exitCode})`);
+
+      const deps = await checkDeps({ refresh: true });
+      if (!deps.ytdlp.ok) {
+        throw new Error('설치 후 yt-dlp 실행 확인에 실패했습니다.');
+      }
+
+      onMessage(`yt-dlp ${deps.ytdlp.version} 설치 완료`);
+      return deps;
     } catch (e) {
-      onMessage(`❌ 업데이트 실패: ${e.message}`);
+      onMessage(`yt-dlp 설치 실패: ${e.message || e}`);
+      throw e;
+    } finally {
+      try { await Neutralino.filesystem.removeFile(scriptPath); } catch {}
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  //  ffmpeg 설치 / 업데이트
+  // ────────────────────────────────────────────────────────────────
+  async function installFfmpeg(onMessage = () => {}) {
+    const dest = await ffmpegInstallPath();
+    const tempDir = await tempWorkDir();
+    const scriptPath = `${tempDir}\\install_ffmpeg_${Date.now()}.ps1`;
+    const urls = [
+      'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip',
+      'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+    ];
+
+    const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
+    const scriptContent = [
+      "$ErrorActionPreference = 'Stop'",
+      "$ProgressPreference = 'SilentlyContinue'",
+      `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
+      `$dest = ${psQuote(dest)}`,
+      `$tmp = Join-Path ([IO.Path]::GetTempPath()) ('ytmp3-ffmpeg-' + [guid]::NewGuid().ToString())`,
+      `$zip = Join-Path $tmp 'ffmpeg.zip'`,
+      `New-Item -ItemType Directory -Force -Path $tmp | Out-Null`,
+      `New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null`,
+      `$urls = @(${urls.map(psQuote).join(', ')})`,
+      `$downloaded = $false`,
+      `$lastError = $null`,
+      `foreach ($url in $urls) {`,
+      `  try {`,
+      `    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing`,
+      `    $downloaded = $true`,
+      `    break`,
+      `  } catch {`,
+      `    $lastError = $_`,
+      `  }`,
+      `}`,
+      `if (-not $downloaded) { throw "ffmpeg 다운로드 실패: $lastError" }`,
+      `Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force`,
+      `$exe = Get-ChildItem -Path $tmp -Recurse -Filter 'ffmpeg.exe' | Where-Object { $_.FullName -match '\\\\bin\\\\ffmpeg\\.exe$' } | Select-Object -First 1`,
+      `if (-not $exe) { $exe = Get-ChildItem -Path $tmp -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1 }`,
+      `if (-not $exe) { throw '압축 파일 안에서 ffmpeg.exe를 찾지 못했습니다.' }`,
+      `Copy-Item -LiteralPath $exe.FullName -Destination $dest -Force`,
+      `& $dest -version | Out-Null`,
+      `Remove-Item -LiteralPath $tmp -Recurse -Force`,
+      `Write-Output "ffmpeg installed: $dest"`
+    ].join('\r\n');
+
+    onMessage('ffmpeg 다운로드 준비 중…');
+    try {
+      await Neutralino.filesystem.writeFile(scriptPath, scriptContent);
+      onMessage('ffmpeg 다운로드 및 압축 해제 중…');
+      const r = await runCmd(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, false);
+      if (r.exitCode !== 0) {
+        const output = `${r.stdOut || ''}\n${r.stdErr || ''}`.trim();
+        throw new Error(output || `PowerShell 종료 코드 ${r.exitCode}`);
+      }
+
+      _cache.ffmpeg = null;
+      _cache.deps = null;
+      _cache.depsAt = 0;
+
+      const deps = await checkDeps({ refresh: true });
+      if (!deps.ffmpeg.ok) {
+        throw new Error('설치 후 ffmpeg 실행 확인에 실패했습니다.');
+      }
+
+      onMessage(`ffmpeg ${deps.ffmpeg.version} 설치 완료`);
+      return deps;
+    } catch (e) {
+      onMessage(`ffmpeg 설치 실패: ${e.message || e}`);
+      throw e;
+    } finally {
+      try { await Neutralino.filesystem.removeFile(scriptPath); } catch {}
     }
   }
 
@@ -544,5 +702,5 @@ const YTDlp = (() => {
     return `${m}:${s}`;
   }
 
-  return { checkDeps, getVideoInfo, download, updateYtdlp, cancelActiveDownload, cleanupTempScripts };
+  return { checkDeps, getVideoInfo, download, updateYtdlp, installYtdlp, installFfmpeg, cancelActiveDownload, cleanupTempScripts };
 })();
