@@ -792,7 +792,8 @@ const Player = (() => {
     pendingSave: {},
     restoredLastTrack: false,
     restoringPosition: null,
-    openMenuTrackId: ''
+    openMenuTrackId: '',
+    trackLoadToken: 0
   };
 
   function el(id) {
@@ -1235,11 +1236,13 @@ const Player = (() => {
 
     state.playlists = state.playlists.filter(item => item.id !== playlistId);
     if (deletingActivePlaylist) {
+      resetPlaybackForPlaylistChange();
       state.activePlaylistId = 'all';
       state.searchQuery = '';
       const search = el('player-search');
       if (search) search.value = '';
-      rebuildQueue(currentId);
+      state.queue = sortTracks(playlistSourceTracks());
+      state.queuePosition = -1;
     }
 
     closePlaylistActionMenus();
@@ -1249,16 +1252,50 @@ const Player = (() => {
     Toast.show(`“${playlist.name}” 플레이리스트를 삭제했습니다.`, 'success', 4000);
   }
 
+  function resetPlaybackForPlaylistChange() {
+    // 진행 중인 비동기 곡 로드를 무효화한다.
+    state.trackLoadToken += 1;
+
+    const audio = el('audio-player');
+    if (audio) clearAudioSource(audio);
+
+    state.queuePosition = -1;
+    state.isLoadingTrack = false;
+    state.isSeeking = false;
+    state.isStreamSeeking = false;
+    state.seekPreviewTime = null;
+    state.restoredPreviewTime = null;
+    state.restoringPosition = null;
+
+    savePlayerSettings({
+      playerLastTrackId: '',
+      playerLastTrackPath: '',
+      playerLastPosition: 0,
+      playerLastDuration: 0
+    }, { immediate: true });
+  }
+
   function setActivePlaylist(playlistId) {
     const nextId = playlistId === 'all' || state.playlists.some(playlist => playlist.id === playlistId)
       ? playlistId
       : 'all';
-    const currentId = currentTrack()?.id || '';
+
+    // 같은 플레이리스트를 다시 선택한 경우에는 재생을 끊지 않는다.
+    if (nextId === state.activePlaylistId) {
+      closePlaylistMenu();
+      return;
+    }
+
+    resetPlaybackForPlaylistChange();
     state.activePlaylistId = nextId;
     state.searchQuery = '';
+
     const search = el('player-search');
     if (search) search.value = '';
-    rebuildQueue(currentId);
+
+    state.queue = sortTracks(playlistSourceTracks());
+    state.queuePosition = -1;
+
     closePlaylistMenu();
     renderPlaylistDropdown();
     render();
@@ -1276,12 +1313,14 @@ const Player = (() => {
     }
 
     const playlist = { id: createPlaylistId(), name, trackIds: [] };
+    resetPlaybackForPlaylistChange();
     state.playlists = [...state.playlists, playlist];
     state.activePlaylistId = playlist.id;
     state.searchQuery = '';
     const search = el('player-search');
     if (search) search.value = '';
-    rebuildQueue();
+    state.queue = sortTracks(playlistSourceTracks());
+    state.queuePosition = -1;
     closePlaylistMenu();
     renderPlaylistDropdown();
     render();
@@ -2878,6 +2917,7 @@ const Player = (() => {
     const track = state.queue[index];
     if (!track) return;
 
+    const loadToken = ++state.trackLoadToken;
     const audio = el('audio-player');
     if (!audio) {
       Toast.show('오디오 플레이어를 초기화하지 못했습니다.', 'error', 5000);
@@ -2896,10 +2936,15 @@ const Player = (() => {
         updateProgress();
       }
       await ensureTrackMetadata(track);
+      if (loadToken !== state.trackLoadToken) return;
       setCurrentText(track);
       renderList();
       clearAudioSource(audio);
       await loadTrackSource(audio, track, shouldPlay, { startTime: restorePosition });
+      if (loadToken !== state.trackLoadToken) {
+        clearAudioSource(audio);
+        return;
+      }
       if (restorePosition > 0) {
         const applyPosition = () => {
           const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
@@ -2929,9 +2974,11 @@ const Player = (() => {
     } catch (e) {
       Toast.show(`재생할 수 없습니다: ${track.fileName}`, 'error', 6000);
     } finally {
-      state.isLoadingTrack = false;
-      updateControls();
-      renderList();
+      if (loadToken === state.trackLoadToken) {
+        state.isLoadingTrack = false;
+        updateControls();
+        renderList();
+      }
     }
   }
 
