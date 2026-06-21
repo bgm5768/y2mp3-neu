@@ -413,8 +413,8 @@ function getConversionOptions() {
   return {
     quality: document.getElementById('quality-select').value,
     format: document.getElementById('format-select').value,
-    embedThumb: document.getElementById('embed-thumb').checked,
-    embedMeta: document.getElementById('embed-meta').checked,
+    embedThumb: true,
+    embedMeta: true,
     savePath: Settings.getActiveSavePath(),
     proxy: settings.useProxy ? settings.proxy : '',
     rateLimit: settings.useRateLimit ? `${settings.rateLimitVal}${settings.rateLimitUnit}` : ''
@@ -2291,8 +2291,8 @@ function initSettingsTab() {
   document.getElementById('save-settings-btn').addEventListener('click', async () => {
     const quality = document.getElementById('quality-select')?.value || '192';
     const format  = document.getElementById('format-select')?.value || 'mp3';
-    const embedThumb = document.getElementById('embed-thumb')?.checked ?? true;
-    const embedMeta  = document.getElementById('embed-meta')?.checked ?? true;
+    const embedThumb = true;
+    const embedMeta = true;
     await Settings.save({ saveDest: 'local', quality, format, embedThumb, embedMeta });
     Player.invalidate();
     Toast.show('설정이 저장되었습니다.', 'success');
@@ -2304,8 +2304,6 @@ function applySettingsToUI(s) {
   if (localPathDisplay) localPathDisplay.textContent = s.localPath || '경로 선택 안 됨';
   if (s.quality) document.getElementById('quality-select').value = s.quality;
   if (s.format) document.getElementById('format-select').value = s.format;
-  document.getElementById('embed-thumb').checked = !!s.embedThumb;
-  document.getElementById('embed-meta').checked  = !!s.embedMeta;
 }
 
 async function ensureDefaultLocalPath(s) {
