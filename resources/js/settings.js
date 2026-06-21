@@ -9,8 +9,6 @@ const Settings = (() => {
   const defaults = {
     saveDest:    'local',
     localPath:   '',
-    pcloudPath:  '',
-    gdrivePath:  '',
     quality:     '192',
     format:      'mp3',
     embedThumb:  true,
@@ -50,11 +48,7 @@ const Settings = (() => {
 
   /** 현재 설정에 따른 실제 저장 경로 반환 */
   function getActiveSavePath() {
-    switch (current.saveDest) {
-      case 'pcloud': return current.pcloudPath || current.localPath;
-      case 'gdrive': return current.gdrivePath || current.localPath;
-      default:       return current.localPath;
-    }
+    return current.localPath;
   }
 
   return { load, save, get, getActiveSavePath };

@@ -24,7 +24,7 @@
   "globalVariables": {},
   "modes": {
     "window": {
-      "title": "YT → MP3 Converter",
+      "title": "mp3 player",
       "width": 900,
       "height": 640,
       "minWidth": 800,
@@ -41,7 +41,7 @@
     }
   },
   "cli": {
-    "binaryName": "yt-mp3-converter",
+    "binaryName": "yt-mp3",
     "resourcesPath": "/resources/",
     "extensionsPath": "/extensions/",
     "clientLibrary": "/resources/js/neutralino.js",

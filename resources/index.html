@@ -25,14 +25,6 @@
       </button>
     </nav>
 
-    <div class="sidebar-bottom">
-      <div id="ffmpeg-status" class="status-badge status-checking">
-        <span class="dot"></span> ffmpeg 확인 중…
-      </div>
-      <div id="ytdlp-status" class="status-badge status-checking">
-        <span class="dot"></span> yt-dlp 확인 중…
-      </div>
-    </div>
   </aside>
 
   <!-- ── MAIN ──────────────────────────────────────── -->
@@ -43,7 +35,7 @@
     <section id="tab-player" class="tab active">
       <div class="page-header">
         <div>
-          <h1><span class="player-title-icon">♪</span> 음악 플레이어</h1>
+          <h1><!--<span class="player-title-icon">♪</span>--> 음악 플레이어</h1>
           <p id="player-path" class="subtitle">현재 저장 위치의 음악 파일을 불러옵니다.</p>
         </div>
         <div class="header-actions">
@@ -216,46 +208,15 @@
       <!-- 저장 위치 -->
       <div class="card settings-card">
         <h2 class="settings-section-title">💾 저장 위치</h2>
-        <div class="settings-group">
-          <label class="radio-label">
-            <input type="radio" name="save-dest" value="local" checked />
-            <span class="radio-box">
-              <span class="radio-icon">🖥</span>
-              <span>
-                <strong>내 PC</strong>
-                <small id="local-path-display">경로 선택 안 됨</small>
-              </span>
+        <div class="settings-group storage-local-only">
+          <div class="storage-current">
+            <span class="radio-icon">🖥</span>
+            <span>
+              <strong>내 PC</strong>
+              <small id="local-path-display">경로 선택 안 됨</small>
             </span>
-          </label>
-          <button id="local-path-btn" class="btn btn-ghost btn-sm indent">📁 경로 선택…</button>
-        </div>
-
-        <div class="settings-group">
-          <label class="radio-label">
-            <input type="radio" name="save-dest" value="pcloud" />
-            <span class="radio-box">
-              <span class="radio-icon">☁️</span>
-              <span>
-                <strong>pCloud Drive</strong>
-                <small id="pcloud-path-display">폴더 미지정</small>
-              </span>
-            </span>
-          </label>
-          <button id="pcloud-path-btn" class="btn btn-ghost btn-sm indent">📁 pCloud 폴더…</button>
-        </div>
-
-        <div class="settings-group">
-          <label class="radio-label">
-            <input type="radio" name="save-dest" value="gdrive" />
-            <span class="radio-box">
-              <span class="radio-icon">🟢</span>
-              <span>
-                <strong>Google Drive</strong>
-                <small id="gdrive-path-display">폴더 미지정</small>
-              </span>
-            </span>
-          </label>
-          <button id="gdrive-path-btn" class="btn btn-ghost btn-sm indent">📁 Google Drive 폴더…</button>
+          </div>
+          <button id="local-path-btn" class="btn btn-ghost btn-sm">📁 경로 선택…</button>
         </div>
       </div>
 

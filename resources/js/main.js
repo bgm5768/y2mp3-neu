@@ -59,21 +59,22 @@ let currentUrlAnalysis = {
 // ── UI helpers ─────────────────────────────────────────────────────────
 const UI = {
   updateDepsStatus({ ffmpeg, ytdlp }) {
-    const ffmpegSidebar = document.getElementById('ffmpeg-status');
-    const ytdlpSidebar  = document.getElementById('ytdlp-status');
-    const ffmpegVer     = document.getElementById('ffmpeg-version');
-    const ytdlpVer      = document.getElementById('ytdlp-version');
+    const ffmpegVer = document.getElementById('ffmpeg-version');
+    const ytdlpVer  = document.getElementById('ytdlp-version');
 
     if (ffmpeg) {
-      const ver = ffmpeg.ok ? (ffmpeg.version.match(/([\d.]+)/)?.[1] || '설치됨') : null;
-      ffmpegSidebar.className = `status-badge ${ffmpeg.ok ? 'status-ok' : 'status-error'}`;
-      ffmpegSidebar.innerHTML = `<span class="dot"></span> ffmpeg ${ffmpeg.ok ? ver : '미설치'}`;
-      if (ffmpegVer) ffmpegVer.textContent = ffmpeg.ok ? (ffmpeg.version || '설치됨') : '설치되지 않음';
+      if (ffmpegVer) {
+        const ver = ffmpeg.ok ? (ffmpeg.version || '버전 확인됨') : '';
+        ffmpegVer.className = `dep-version ${ffmpeg.ok ? 'status-ok' : 'status-error'}`;
+        ffmpegVer.textContent = ffmpeg.ok ? `정상 설치됨 · ${ver}` : '설치되지 않음';
+      }
     }
     if (ytdlp) {
-      ytdlpSidebar.className = `status-badge ${ytdlp.ok ? 'status-ok' : 'status-error'}`;
-      ytdlpSidebar.innerHTML = `<span class="dot"></span> yt-dlp ${ytdlp.ok ? ytdlp.version : '미설치'}`;
-      if (ytdlpVer) ytdlpVer.textContent = ytdlp.ok ? ytdlp.version : '설치되지 않음';
+      if (ytdlpVer) {
+        const ver = ytdlp.ok ? (ytdlp.version || '버전 확인됨') : '';
+        ytdlpVer.className = `dep-version ${ytdlp.ok ? 'status-ok' : 'status-error'}`;
+        ytdlpVer.textContent = ytdlp.ok ? `정상 설치됨 · ${ver}` : '설치되지 않음';
+      }
     }
 
     try {
@@ -1638,20 +1639,8 @@ const Player = (() => {
   }
 
   async function libraryPathCandidates() {
-    const settings = Settings.get();
-    const candidates = [
-      Settings.getActiveSavePath(),
-      settings.localPath
-    ];
-
-    try {
-      candidates.push(await Neutralino.os.getPath('music'));
-    } catch {}
-
-    return candidates
-      .map(path => String(path || '').trim())
-      .filter(Boolean)
-      .filter((path, index, list) => list.findIndex(item => item.toLowerCase() === path.toLowerCase()) === index);
+    const activePath = String(Settings.getActiveSavePath() || '').trim();
+    return activePath ? [activePath] : [];
   }
 
   async function scanAudioFiles(savePath) {
@@ -2027,6 +2016,24 @@ const Player = (() => {
   }
 
   function invalidate() {
+    const activePath = String(Settings.getActiveSavePath() || '').trim();
+    const loadedPath = String(state.loadedPath || '').trim();
+    const pathChanged = !!loadedPath && !!activePath && loadedPath.toLowerCase() !== activePath.toLowerCase();
+
+    if (pathChanged) {
+      const audio = el('audio-player');
+      if (audio) clearAudioSource(audio);
+      state.tracks = [];
+      state.queue = [];
+      state.queuePosition = -1;
+      state.restoredLastTrack = false;
+      state.restoredPreviewTime = null;
+      state.seekPreviewTime = null;
+      setText('player-path', `현재 저장 위치: ${activePath}`);
+      setText('player-summary', `음악 파일을 불러오는 중… ${activePath}`);
+      render();
+    }
+
     state.loadedPath = '';
     if (document.getElementById('tab-player')?.classList.contains('active')) {
       void loadLibrary({ force: true });
@@ -2232,28 +2239,20 @@ function initConvertScreen() {
 
 function initSettingsTab() {
   const folderBtns = [
-    { btn: 'local-path-btn',  display: 'local-path-display',  key: 'localPath',  title: '저장 폴더 선택' },
-    { btn: 'pcloud-path-btn', display: 'pcloud-path-display', key: 'pcloudPath', title: 'pCloud 폴더 선택' },
-    { btn: 'gdrive-path-btn', display: 'gdrive-path-display', key: 'gdrivePath', title: 'Google Drive 폴더 선택' }
+    { btn: 'local-path-btn', display: 'local-path-display', key: 'localPath', title: '저장 폴더 선택' }
   ];
 
   folderBtns.forEach(({ btn, display, key, title }) => {
-    document.getElementById(btn).addEventListener('click', async () => {
+    document.getElementById(btn)?.addEventListener('click', async () => {
       try {
         const p = await Neutralino.os.showFolderDialog(title);
         if (p) {
-          document.getElementById(display).textContent = p;
-          await Settings.save({ [key]: p });
+          const displayEl = document.getElementById(display);
+          if (displayEl) displayEl.textContent = p;
+          await Settings.save({ saveDest: 'local', [key]: p });
           Player.invalidate();
         }
       } catch {}
-    });
-  });
-
-  document.querySelectorAll('input[name="save-dest"]').forEach(r => {
-    r.addEventListener('change', async () => {
-      await Settings.save({ saveDest: r.value });
-      Player.invalidate();
     });
   });
 
@@ -2290,24 +2289,19 @@ function initSettingsTab() {
   });
 
   document.getElementById('save-settings-btn').addEventListener('click', async () => {
-    const dest = document.querySelector('input[name="save-dest"]:checked')?.value || 'local';
     const quality = document.getElementById('quality-select')?.value || '192';
     const format  = document.getElementById('format-select')?.value || 'mp3';
     const embedThumb = document.getElementById('embed-thumb')?.checked ?? true;
     const embedMeta  = document.getElementById('embed-meta')?.checked ?? true;
-    await Settings.save({ saveDest: dest, quality, format, embedThumb, embedMeta });
+    await Settings.save({ saveDest: 'local', quality, format, embedThumb, embedMeta });
     Player.invalidate();
     Toast.show('설정이 저장되었습니다.', 'success');
   });
 }
 
 function applySettingsToUI(s) {
-  if (s.localPath)  document.getElementById('local-path-display').textContent  = s.localPath;
-  if (s.pcloudPath) document.getElementById('pcloud-path-display').textContent = s.pcloudPath;
-  if (s.gdrivePath) document.getElementById('gdrive-path-display').textContent = s.gdrivePath;
-
-  const radio = document.querySelector(`input[name="save-dest"][value="${s.saveDest}"]`);
-  if (radio) radio.checked = true;
+  const localPathDisplay = document.getElementById('local-path-display');
+  if (localPathDisplay) localPathDisplay.textContent = s.localPath || '경로 선택 안 됨';
   if (s.quality) document.getElementById('quality-select').value = s.quality;
   if (s.format) document.getElementById('format-select').value = s.format;
   document.getElementById('embed-thumb').checked = !!s.embedThumb;
@@ -2315,6 +2309,10 @@ function applySettingsToUI(s) {
 }
 
 async function ensureDefaultLocalPath(s) {
+  if (s.saveDest !== 'local') {
+    s = await Settings.save({ saveDest: 'local' });
+  }
+
   if (s.localPath) return s;
 
   const preferredPaths = ['music', 'downloads', 'documents'];
