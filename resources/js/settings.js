@@ -23,7 +23,9 @@ const Settings = (() => {
     playerLastTrackId: '',
     playerLastTrackPath: '',
     playerLastPosition: 0,
-    playerLastDuration: 0
+    playerLastDuration: 0,
+    playerActivePlaylistId: 'all',
+    playerPlaylists: []
   };
 
   let current = { ...defaults };

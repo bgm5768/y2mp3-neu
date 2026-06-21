@@ -98,7 +98,16 @@
 
       <div class="player-list-header">
         <div class="player-list-heading">
-          <h2>♫ 음악 목록</h2>
+          <div class="player-list-title-row">
+            <h2>음악</h2>
+            <div class="player-playlist-dropdown">
+              <button id="player-playlist-btn" class="player-playlist-btn" type="button" aria-haspopup="menu" aria-expanded="false">
+                내 음악
+                <span aria-hidden="true">⌄</span>
+              </button>
+              <div id="player-playlist-menu" class="player-playlist-menu hidden" role="menu"></div>
+            </div>
+          </div>
           <p id="player-summary" class="queue-summary">음악 파일 0개</p>
         </div>
         <div class="player-list-toolbar">
