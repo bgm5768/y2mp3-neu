@@ -861,7 +861,7 @@ const Player = (() => {
       const heading = document.createElement('div');
       heading.className = 'player-list-heading';
       const title = document.createElement('h2');
-      title.textContent = '재생 목록';
+      title.textContent = '음악 목록';
       const summary = document.createElement('p');
       summary.id = 'player-summary';
       summary.className = 'queue-summary';
@@ -879,7 +879,7 @@ const Player = (() => {
       search.id = 'player-search';
       search.className = 'player-search';
       search.type = 'search';
-      search.placeholder = '재생 목록 검색';
+      search.placeholder = '음악 검색';
       search.autocomplete = 'off';
       search.spellcheck = false;
       searchWrap.append(searchIcon, search);
