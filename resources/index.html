@@ -38,10 +38,6 @@
           <h1><!--<span class="player-title-icon">♪</span>--> 음악 플레이어</h1>
           <p id="player-path" class="subtitle">현재 저장 위치의 음악 파일을 불러옵니다.</p>
         </div>
-        <div class="header-actions">
-          <!--<button id="player-refresh-btn" class="btn btn-secondary btn-sm">↻ 목록 새로고침</button> -->
-          <button id="player-open-folder-btn" class="btn btn-ghost btn-sm">▣ 저장 폴더 열기</button>
-        </div>
       </div>
 
       <div class="card player-card is-loading">
@@ -216,7 +212,11 @@
               <small id="local-path-display">경로 선택 안 됨</small>
             </span>
           </div>
-          <button id="local-path-btn" class="btn btn-ghost btn-sm">📁 경로 선택…</button>
+          <div>
+              <button id="local-path-btn" class="btn btn-ghost btn-sm">📁 경로 선택…</button>
+              <button id="player-open-folder-btn" class="btn btn-ghost btn-sm">▣ 저장 폴더 열기</button>
+          </div>
+
         </div>
       </div>
 
