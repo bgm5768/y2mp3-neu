@@ -38,6 +38,7 @@ import {
 import { createTrackList } from './track-list.js';
 import { createMetadata } from './metadata.js';
 import { createAudioStream } from './audio-stream.js';
+import { Dialog } from '../ui/dialog.js';
 
 let Settings = null;
 let Neutralino = null;
@@ -307,7 +308,17 @@ async function renameTrackFile(trackId) {
   if (!track) return;
 
   const oldFileName = track.fileName || fileName(track.path);
-  const input = window.prompt('새 파일 이름을 입력하세요. 확장자는 자동으로 유지됩니다.', oldFileName);
+  const input = await Dialog.prompt({
+    title: '음악 파일 이름 변경',
+    message: '새 파일 이름을 입력하세요. 확장자는 자동으로 유지됩니다.',
+    label: '파일 이름',
+    value: oldFileName,
+    confirmText: '변경',
+    validate: value => {
+      const normalized = normalizeRenameFileName(value, oldFileName);
+      return normalized.ok ? { value: normalized.name } : normalized.message;
+    }
+  });
   if (input === null) return;
 
   const normalized = normalizeRenameFileName(input, oldFileName);
@@ -358,13 +369,13 @@ async function renameTrackFile(trackId) {
 }
 
 async function confirmRemoveTrack(track) {
-  const message = `${track.fileName || fileName(track.path)}\n\n이 작업은 실제 음악 파일을 삭제합니다. 계속할까요?`;
-  try {
-    const choice = await Neutralino.os.showMessageBox('목록에서 제거', message, 'YES_NO', 'WARNING');
-    return /^(YES|OK)$/i.test(String(choice || ''));
-  } catch {
-    return window.confirm(message);
-  }
+  return Dialog.confirm({
+    title: '음악 파일 삭제',
+    message: track.fileName || fileName(track.path),
+    detail: '이 작업은 실제 음악 파일을 삭제합니다. 계속할까요?',
+    confirmText: '삭제',
+    danger: true
+  });
 }
 
 async function removeTrackFile(trackId) {
@@ -906,7 +917,7 @@ function init() {
 
     if (action === 'create') {
       closePlaylistMenu();
-      createPlaylist();
+      void createPlaylist();
       return;
     }
 
@@ -921,12 +932,12 @@ function init() {
     }
 
     if (action === 'rename') {
-      renamePlaylist(playlistId);
+      void renamePlaylist(playlistId);
       return;
     }
 
     if (action === 'delete') {
-      deletePlaylist(playlistId);
+      void deletePlaylist(playlistId);
     }
   });
   volume?.addEventListener('input', e => {
@@ -1063,7 +1074,7 @@ export function createPlayer(dependencies = {}) {
     findFrameOffsetNear
   }));
 
-  configurePlaylist({ Toast, savePlayerSettings, sortTracks, clearAudioSource, currentTrack, rebuildQueue, hydrateTrackDurations });
+  configurePlaylist({ Toast, savePlayerSettings, sortTracks, clearAudioSource, currentTrack, rebuildQueue, hydrateTrackDurations, Dialog });
 
   configurePlayerUi({
     currentTrack,

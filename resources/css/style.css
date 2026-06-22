@@ -1512,6 +1512,158 @@ code {
   color: var(--accent2);
 }
 
+/* App Dialog */
+.app-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(5, 8, 15, .72);
+  backdrop-filter: blur(12px);
+  animation: dialogBackdropIn .16s ease;
+}
+.app-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background:
+    linear-gradient(180deg, rgba(32,36,50,.98), rgba(18,21,31,.98));
+  border: 1px solid rgba(101,111,140,.48);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(0,0,0,.62), 0 0 0 1px rgba(255,255,255,.04) inset;
+  padding: 22px;
+  animation: dialogIn .18s ease;
+}
+.app-dialog-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.app-dialog-kicker {
+  align-self: flex-start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(29,233,182,.12);
+  color: var(--accent2);
+  border: 1px solid rgba(29,233,182,.22);
+  font-size: 11px;
+  font-weight: 700;
+}
+.app-dialog-danger .app-dialog-kicker {
+  background: rgba(255,82,82,.12);
+  color: var(--danger);
+  border-color: rgba(255,82,82,.28);
+}
+.app-dialog-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+.app-dialog-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+.app-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+}
+.app-dialog-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+.app-dialog-input {
+  width: 100%;
+  min-width: 0;
+  background: rgba(11,14,22,.92);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 13px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+.app-dialog-input:focus {
+  border-color: var(--accent2);
+  box-shadow: 0 0 0 3px rgba(29,233,182,.12);
+  background: rgba(15,18,27,.96);
+}
+.app-dialog-input[aria-invalid="true"] {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(255,82,82,.12);
+}
+.app-dialog-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.app-dialog-detail {
+  margin-top: 16px;
+  padding: 12px 13px;
+  border-radius: 8px;
+  border: 1px solid rgba(101,111,140,.32);
+  background: rgba(10,13,20,.56);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-line;
+  word-break: break-word;
+}
+.app-dialog-danger .app-dialog-detail {
+  border-color: rgba(255,82,82,.22);
+  background: rgba(59,26,26,.32);
+  color: #ffd2d2;
+}
+.app-dialog-error {
+  margin-top: 12px;
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+.app-dialog-actions .btn {
+  min-width: 86px;
+  justify-content: center;
+}
+@media (max-width: 480px) {
+  .app-dialog-backdrop {
+    padding: 16px;
+  }
+  .app-dialog {
+    padding: 18px;
+  }
+  .app-dialog-actions {
+    flex-direction: column-reverse;
+  }
+  .app-dialog-actions .btn {
+    width: 100%;
+  }
+}
+
+@keyframes dialogBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dialogIn {
+  from { transform: translateY(8px) scale(.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
 /* ── Toast ───────────────────────────────────────── */
 .toast-container {
   position: fixed;

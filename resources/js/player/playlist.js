@@ -13,6 +13,10 @@ let clearAudioSource = () => {};
 let currentTrack = () => null;
 let rebuildQueue = () => {};
 let hydrateTrackDurations = async () => {};
+let Dialog = {
+  prompt: async () => null,
+  confirm: async () => false
+};
 
 export function configurePlaylist(deps = {}) {
   Toast = deps.Toast || Toast;
@@ -22,10 +26,27 @@ export function configurePlaylist(deps = {}) {
   currentTrack = deps.currentTrack || currentTrack;
   rebuildQueue = deps.rebuildQueue || rebuildQueue;
   hydrateTrackDurations = deps.hydrateTrackDurations || hydrateTrackDurations;
+  Dialog = deps.Dialog || Dialog;
 }
 
 function normalizePlaylistName(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function validatePlaylistName(value, currentPlaylistId = '') {
+  const nextName = normalizePlaylistName(value);
+  if (!nextName) return '플레이리스트 이름을 입력해 주세요.';
+
+  const duplicated = state.playlists.some(item =>
+    item.id !== currentPlaylistId &&
+    item.name.toLocaleLowerCase() === nextName.toLocaleLowerCase()
+  );
+
+  if (duplicated || nextName.toLocaleLowerCase() === '내 음악'.toLocaleLowerCase()) {
+    return '같은 이름의 플레이리스트가 이미 있습니다.';
+  }
+
+  return { value: nextName };
 }
 
 export function createPlaylistId() {
@@ -245,28 +266,21 @@ export function togglePlaylistActionMenu(playlistId) {
   closePlaylistActionMenus(willOpen ? playlistId : '');
 }
 
-export function renamePlaylist(playlistId) {
+export async function renamePlaylist(playlistId) {
   const playlist = state.playlists.find(item => item.id === playlistId);
   if (!playlist) return;
 
-  const input = window.prompt('새 플레이리스트 이름을 입력하세요.', playlist.name);
+  const input = await Dialog.prompt({
+    title: '플레이리스트 이름 변경',
+    message: '새 이름을 입력하면 목록과 드롭다운에 바로 반영됩니다.',
+    label: '플레이리스트 이름',
+    value: playlist.name,
+    confirmText: '변경',
+    validate: value => validatePlaylistName(value, playlistId)
+  });
   if (input === null) return;
 
   const nextName = normalizePlaylistName(input);
-  if (!nextName) {
-    Toast.show('플레이리스트 이름을 입력해 주세요.', 'warning', 4000);
-    return;
-  }
-
-  const duplicated = state.playlists.some(item =>
-    item.id !== playlistId &&
-    item.name.toLocaleLowerCase() === nextName.toLocaleLowerCase()
-  );
-
-  if (duplicated || nextName.toLocaleLowerCase() === '내 음악'.toLocaleLowerCase()) {
-    Toast.show('같은 이름의 플레이리스트가 이미 있습니다.', 'error', 5000);
-    return;
-  }
 
   if (playlist.name === nextName) {
     closePlaylistActionMenus();
@@ -284,17 +298,20 @@ export function renamePlaylist(playlistId) {
   Toast.show(`“${previousName}”을(를) “${nextName}”으로 변경했습니다.`, 'success', 4000);
 }
 
-export function deletePlaylist(playlistId) {
+export async function deletePlaylist(playlistId) {
   const playlist = state.playlists.find(item => item.id === playlistId);
   if (!playlist) return;
 
-  const confirmed = window.confirm(
-    `“${playlist.name}” 플레이리스트를 삭제할까요?\n\n플레이리스트만 삭제되며 음악 파일은 삭제되지 않습니다.`
-  );
+  const confirmed = await Dialog.confirm({
+    title: '플레이리스트 삭제',
+    message: `“${playlist.name}” 플레이리스트를 삭제할까요?`,
+    detail: '플레이리스트만 삭제되며 음악 파일은 삭제되지 않습니다.',
+    confirmText: '삭제',
+    danger: true
+  });
   if (!confirmed) return;
 
   const deletingActivePlaylist = state.activePlaylistId === playlistId;
-  const currentId = currentTrack()?.id || '';
 
   state.playlists = state.playlists.filter(item => item.id !== playlistId);
   if (deletingActivePlaylist) {
@@ -365,14 +382,18 @@ export function setActivePlaylist(playlistId) {
   if (state.sortKey === 'duration') void hydrateTrackDurations();
 }
 
-export function createPlaylist() {
-  const name = normalizePlaylistName(window.prompt('새 플레이리스트 이름을 입력하세요.', '새 플레이리스트'));
-  if (!name) return;
-  const exists = state.playlists.some(playlist => playlist.name.toLocaleLowerCase() === name.toLocaleLowerCase());
-  if (exists || name === '내 음악') {
-    Toast.show('같은 이름의 플레이리스트가 이미 있습니다.', 'error', 5000);
-    return;
-  }
+export async function createPlaylist() {
+  const input = await Dialog.prompt({
+    title: '새 플레이리스트',
+    message: '새 플레이리스트를 만들고 바로 선택합니다.',
+    label: '플레이리스트 이름',
+    value: '새 플레이리스트',
+    confirmText: '만들기',
+    validate: value => validatePlaylistName(value)
+  });
+  if (input === null) return;
+
+  const name = normalizePlaylistName(input);
 
   const playlist = { id: createPlaylistId(), name, trackIds: [] };
   resetPlaybackForPlaylistChange();
@@ -414,7 +435,21 @@ export async function addTrackToPlaylist(trackId) {
   }
 
   const defaultName = activePlaylist()?.name || state.playlists[0].name;
-  const input = window.prompt(`추가할 플레이리스트 번호 또는 이름을 입력하세요.\n\n${playlistPromptLabel()}`, defaultName);
+  const input = await Dialog.prompt({
+    title: '플레이리스트에 추가',
+    message: track.title || track.fileName || '선택한 곡을 추가할 플레이리스트를 고르세요.',
+    label: '번호 또는 이름',
+    value: defaultName,
+    hint: '아래 목록의 번호 또는 이름을 입력하세요.',
+    detail: playlistPromptLabel(),
+    confirmText: '추가',
+    validate: value => {
+      const playlist = findPlaylistByInput(value);
+      if (!playlist) return '플레이리스트를 찾지 못했습니다.';
+      if (playlist.trackIds.includes(track.id)) return '이미 해당 플레이리스트에 있는 곡입니다.';
+      return { value: normalizePlaylistName(value) };
+    }
+  });
   if (input === null) return;
 
   const playlist = findPlaylistByInput(input);
