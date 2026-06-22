@@ -410,68 +410,155 @@ export async function createPlaylist() {
   savePlaylists();
   Toast.show(`${name} 플레이리스트를 만들었습니다.`, 'success', 4000);
 }
-function playlistPromptLabel() {
-  return state.playlists
-    .map((playlist, index) => `${index + 1}. ${playlist.name}`)
-    .join('\n');
+function tracksByIds(trackIds) {
+  const trackMap = new Map([...state.tracks, ...state.queue].map(track => [track.id, track]));
+  const ids = Array.isArray(trackIds) ? trackIds : [trackIds];
+  const seen = new Set();
+  return ids
+    .map(trackId => trackMap.get(trackId))
+    .filter(track => {
+      if (!track || seen.has(track.id)) return false;
+      seen.add(track.id);
+      return true;
+    });
 }
 
-function findPlaylistByInput(input) {
-  const value = normalizePlaylistName(input);
-  if (!value) return null;
-  const index = Number(value);
-  if (Number.isInteger(index) && index >= 1 && index <= state.playlists.length) {
-    return state.playlists[index - 1];
-  }
-  return state.playlists.find(playlist => playlist.name.toLocaleLowerCase() === value.toLocaleLowerCase()) || null;
+function selectedTracksDetail(tracks) {
+  const shown = tracks
+    .slice(0, 6)
+    .map(track => `- ${track.title || track.fileName || '제목 없음'}`);
+  if (tracks.length > shown.length) shown.push(`외 ${tracks.length - shown.length}곡`);
+  return shown.join('\n');
 }
 
-export async function addTrackToPlaylist(trackId) {
-  const track = [...state.tracks, ...state.queue].find(item => item.id === trackId);
-  if (!track) return;
-  if (!state.playlists.length) {
-    Toast.show('먼저 플레이리스트를 만들어 주세요.', 'warning', 5000);
-    return;
+function playlistAddableTrackIds(playlist, tracks) {
+  const existing = new Set(playlist.trackIds);
+  return tracks.map(track => track.id).filter(trackId => !existing.has(trackId));
+}
+
+export function addKnownTrackIdsToPlaylist(trackIds, playlistId, { silent = false } = {}) {
+  const tracks = tracksByIds(trackIds);
+  const playlist = state.playlists.find(item => item.id === playlistId);
+  if (!playlist || !tracks.length) {
+    return {
+      addedCount: 0,
+      addedTrackIds: [],
+      playlistId: playlist?.id || '',
+      playlistName: playlist?.name || '',
+      activePlaylistUpdated: false,
+      wasQueueEmpty: false,
+      wasTrackSelected: false
+    };
   }
 
-  const defaultName = activePlaylist()?.name || state.playlists[0].name;
-  const input = await Dialog.prompt({
-    title: '플레이리스트에 추가',
-    message: track.title || track.fileName || '선택한 곡을 추가할 플레이리스트를 고르세요.',
-    label: '번호 또는 이름',
-    value: defaultName,
-    hint: '아래 목록의 번호 또는 이름을 입력하세요.',
-    detail: playlistPromptLabel(),
-    confirmText: '추가',
-    validate: value => {
-      const playlist = findPlaylistByInput(value);
-      if (!playlist) return '플레이리스트를 찾지 못했습니다.';
-      if (playlist.trackIds.includes(track.id)) return '이미 해당 플레이리스트에 있는 곡입니다.';
-      return { value: normalizePlaylistName(value) };
-    }
-  });
-  if (input === null) return;
-
-  const playlist = findPlaylistByInput(input);
-  if (!playlist) {
-    Toast.show('플레이리스트를 찾지 못했습니다.', 'error', 5000);
-    return;
-  }
-  if (playlist.trackIds.includes(track.id)) {
-    Toast.show('이미 해당 플레이리스트에 있는 곡입니다.', 'info', 4000);
-    return;
+  const activePlaylistUpdated = state.activePlaylistId === playlist.id;
+  const wasQueueEmpty = activePlaylistUpdated && state.queue.length === 0;
+  const wasTrackSelected = activePlaylistUpdated && state.queuePosition >= 0 && !!currentTrack();
+  const addableTrackIds = playlistAddableTrackIds(playlist, tracks);
+  if (!addableTrackIds.length) {
+    if (!silent) Toast.show('선택한 곡이 모두 해당 플레이리스트에 이미 있습니다.', 'info', 4000);
+    return {
+      addedCount: 0,
+      addedTrackIds: [],
+      playlistId: playlist.id,
+      playlistName: playlist.name,
+      activePlaylistUpdated,
+      wasQueueEmpty,
+      wasTrackSelected
+    };
   }
 
   state.playlists = state.playlists.map(item => item.id === playlist.id
-    ? { ...item, trackIds: [...item.trackIds, track.id] }
+    ? { ...item, trackIds: [...item.trackIds, ...addableTrackIds] }
     : item);
   savePlaylists();
   renderPlaylistDropdown();
-  if (state.activePlaylistId === playlist.id) {
-    rebuildQueue(currentTrack()?.id || track.id);
+  if (activePlaylistUpdated) {
+    rebuildQueue(currentTrack()?.id || addableTrackIds[0]);
     render();
   }
-  Toast.show(`${playlist.name}에 추가했습니다.`, 'success', 4000);
+
+  if (!silent) {
+    Toast.show(
+      addableTrackIds.length === 1
+        ? `${playlist.name}에 추가했습니다.`
+        : `${playlist.name}에 ${addableTrackIds.length}곡을 추가했습니다.`,
+      'success',
+      4000
+    );
+  }
+
+  return {
+    addedCount: addableTrackIds.length,
+    addedTrackIds: addableTrackIds,
+    playlistId: playlist.id,
+    playlistName: playlist.name,
+    activePlaylistUpdated,
+    wasQueueEmpty,
+    wasTrackSelected
+  };
+}
+
+export async function addTracksToPlaylist(trackIds) {
+  const tracks = tracksByIds(trackIds);
+  if (!tracks.length) return { addedCount: 0 };
+  if (!state.playlists.length) {
+    Toast.show('먼저 플레이리스트를 만들어 주세요.', 'warning', 5000);
+    return { addedCount: 0 };
+  }
+
+  const defaultPlaylist = state.playlists.find(playlist => playlistAddableTrackIds(playlist, tracks).length > 0)
+    || activePlaylist()
+    || state.playlists[0];
+  const selectedPlaylistId = await Dialog.select({
+    title: '플레이리스트에 추가',
+    message: tracks.length === 1
+      ? `“${tracks[0].title || tracks[0].fileName}”을(를) 추가할 플레이리스트를 선택하세요.`
+      : `${tracks.length}곡을 추가할 플레이리스트를 선택하세요.`,
+    label: '플레이리스트',
+    value: defaultPlaylist?.id || '',
+    options: state.playlists.map(playlist => ({
+      value: playlist.id,
+      label: `${playlist.name} (${playlist.trackIds.length}곡)`
+    })),
+    detail: selectedTracksDetail(tracks),
+    confirmText: '추가',
+    validate: value => {
+      const playlist = state.playlists.find(item => item.id === value);
+      if (!playlist) return '플레이리스트를 찾지 못했습니다.';
+      if (!playlistAddableTrackIds(playlist, tracks).length) {
+        return tracks.length === 1
+          ? '이미 해당 플레이리스트에 있는 곡입니다.'
+          : '선택한 곡이 모두 해당 플레이리스트에 이미 있습니다.';
+      }
+      return { value: playlist.id };
+    }
+  });
+  if (selectedPlaylistId === null) return { addedCount: 0 };
+
+  const playlist = state.playlists.find(item => item.id === selectedPlaylistId);
+  if (!playlist) {
+    Toast.show('플레이리스트를 찾지 못했습니다.', 'error', 5000);
+    return { addedCount: 0 };
+  }
+
+  const addableTrackIds = playlistAddableTrackIds(playlist, tracks);
+  if (!addableTrackIds.length) {
+    Toast.show(
+      tracks.length === 1
+        ? '이미 해당 플레이리스트에 있는 곡입니다.'
+        : '선택한 곡이 모두 해당 플레이리스트에 이미 있습니다.',
+      'info',
+      4000
+    );
+    return { addedCount: 0, playlistId: playlist.id };
+  }
+
+  return addKnownTrackIdsToPlaylist(addableTrackIds, playlist.id);
+}
+
+export async function addTrackToPlaylist(trackId) {
+  return addTracksToPlaylist([trackId]);
 }
 
 export function removeTrackFromActivePlaylist(trackId) {

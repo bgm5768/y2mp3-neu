@@ -35,7 +35,8 @@ async function loadModules() {
     { createQueueUi },
     { createConverter },
     { createPlayer },
-    { createSettingsUi }
+    { createSettingsUi },
+    { installWindowGuard }
   ] = await Promise.all([
     import('./core/app-state.js'),
     import('./ui/toast.js'),
@@ -43,7 +44,8 @@ async function loadModules() {
     import('./converter/queue-ui.js'),
     import('./converter/converter.js'),
     import('./player/player.js'),
-    import('./settings/settings-ui.js')
+    import('./settings/settings-ui.js'),
+    import('./core/window-guard.js')
   ]);
 
   const appState = createAppState();
@@ -66,6 +68,7 @@ async function loadModules() {
   const SettingsUI = createSettingsUi({ Settings, Neutralino, YTDlp, Toast, DependencyUI, getPlayer });
 
   DependencyUI.setGateChangeHandler(Converter.updateConvertButton);
+  installWindowGuard(Neutralino);
 
   return { Toast, DependencyUI, Converter, SettingsUI, getPlayer };
 }

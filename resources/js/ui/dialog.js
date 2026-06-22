@@ -47,10 +47,13 @@ function buildDialog() {
   input.autocomplete = 'off';
   input.spellcheck = false;
 
+  const select = document.createElement('select');
+  select.className = 'app-dialog-select hidden';
+
   const hint = document.createElement('small');
   hint.className = 'app-dialog-hint';
 
-  field.append(label, input, hint);
+  field.append(label, input, select, hint);
 
   const detail = document.createElement('div');
   detail.className = 'app-dialog-detail hidden';
@@ -86,8 +89,14 @@ function buildDialog() {
       submitDialog();
     }
   });
+  select.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submitDialog();
+    }
+  });
 
-  return { backdrop, dialog, kicker, title, message, field, label, input, hint, detail, error, cancel, confirm };
+  return { backdrop, dialog, kicker, title, message, field, label, input, select, hint, detail, error, cancel, confirm };
 }
 
 function ensureDialog() {
@@ -124,6 +133,7 @@ function setError(message) {
   if (!elements) return;
   setOptionalText(elements.error, message);
   elements.input.setAttribute('aria-invalid', message ? 'true' : 'false');
+  elements.select.setAttribute('aria-invalid', message ? 'true' : 'false');
 }
 
 function focusInitialControl() {
@@ -133,6 +143,10 @@ function focusInitialControl() {
     if (active.mode === 'prompt') {
       elements.input.focus();
       elements.input.select();
+      return;
+    }
+    if (active.mode === 'select') {
+      elements.select.focus();
       return;
     }
     elements.confirm.focus();
@@ -150,7 +164,7 @@ function handleKeydown(event) {
 
   if (event.key !== 'Tab') return;
 
-  const focusable = [elements.input, elements.cancel, elements.confirm]
+  const focusable = [elements.input, elements.select, elements.cancel, elements.confirm]
     .filter(node => !node.disabled && !node.closest('.hidden'));
   if (!focusable.length) return;
 
@@ -182,18 +196,39 @@ function openDialog(mode, options = {}) {
 
   dialog.confirm.className = `btn ${options.danger ? 'btn-danger' : 'btn-primary'} app-dialog-confirm`;
 
-  const showField = mode === 'prompt';
+  const showField = mode === 'prompt' || mode === 'select';
   dialog.field.classList.toggle('hidden', !showField);
-  if (showField) {
+  dialog.input.classList.toggle('hidden', mode !== 'prompt');
+  dialog.select.classList.toggle('hidden', mode !== 'select');
+
+  if (mode === 'prompt') {
     dialog.label.textContent = options.label || '이름';
     dialog.input.value = options.value ?? '';
     dialog.input.placeholder = options.placeholder || '';
     dialog.input.maxLength = Number.isFinite(Number(options.maxLength)) ? Number(options.maxLength) : 240;
     setOptionalText(dialog.hint, options.hint);
+  } else if (mode === 'select') {
+    dialog.label.textContent = options.label || '선택';
+    dialog.select.innerHTML = '';
+    (options.options || []).forEach(option => {
+      const item = document.createElement('option');
+      item.value = String(option.value ?? '');
+      item.textContent = option.label ?? option.value ?? '';
+      item.disabled = !!option.disabled;
+      dialog.select.appendChild(item);
+    });
+    dialog.select.value = String(options.value ?? dialog.select.options[0]?.value ?? '');
+    dialog.confirm.disabled = !dialog.select.options.length;
+    setOptionalText(dialog.hint, options.hint);
   } else {
     dialog.input.value = '';
+    dialog.select.innerHTML = '';
     dialog.input.removeAttribute('aria-invalid');
+    dialog.select.removeAttribute('aria-invalid');
+    dialog.confirm.disabled = false;
   }
+
+  if (mode !== 'select') dialog.confirm.disabled = false;
 
   setOptionalText(dialog.detail, options.detail);
   setError('');
@@ -214,7 +249,7 @@ function submitDialog() {
     return;
   }
 
-  const rawValue = elements.input.value;
+  const rawValue = active.mode === 'select' ? elements.select.value : elements.input.value;
   const validation = normalizeValidationResult(active.options.validate?.(rawValue), rawValue);
   if (!validation.ok) {
     setError(validation.message || '입력값을 확인해 주세요.');
@@ -244,6 +279,9 @@ function closeDialog(value, { restoreFocus = true } = {}) {
 export const Dialog = {
   prompt(options = {}) {
     return openDialog('prompt', options);
+  },
+  select(options = {}) {
+    return openDialog('select', options);
   },
   confirm(options = {}) {
     return openDialog('confirm', options);

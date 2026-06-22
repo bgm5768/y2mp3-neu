@@ -317,6 +317,15 @@ body {
   font-size: 12px;
   color: var(--text-muted);
 }
+.convert-playlist-option {
+  min-width: min(260px, 100%);
+}
+.convert-option-hint {
+  max-width: 320px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
 .checkbox-label {
   flex-direction: row;
   align-items: center;
@@ -1176,6 +1185,48 @@ input[type="checkbox"] {
   justify-content: flex-end;
   gap: 8px;
 }
+.player-selection-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(101,111,140,.5);
+  border-radius: 10px;
+  background: rgba(7,13,25,.62);
+}
+.player-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #dce3f3;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.player-select-all input,
+.player-track-select input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent2);
+  cursor: pointer;
+}
+.player-selection-status {
+  min-width: 0;
+  color: #9aa5bd;
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player-selection-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .player-sort-label {
   color: #9aa5bd;
   font-size: 12px;
@@ -1235,7 +1286,7 @@ input[type="checkbox"] {
 .player-track {
   width: 100%;
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 72px 86px 28px;
+  grid-template-columns: 52px minmax(0, 1fr) 72px 86px 28px;
   gap: 14px;
   align-items: center;
   padding: 16px 22px;
@@ -1247,6 +1298,27 @@ input[type="checkbox"] {
   text-align: left;
   cursor: pointer;
   transition: background var(--transition), transform .1s;
+}
+.player-track.is-selectable {
+  grid-template-columns: 28px 52px minmax(0, 1fr) 72px 86px 28px;
+}
+.player-track.is-selected {
+  background: rgba(29,233,182,.08);
+  box-shadow: inset 3px 0 0 rgba(29,233,182,.75);
+}
+.player-track.is-selected:hover {
+  background: rgba(29,233,182,.12);
+}
+.player-track-select {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.player-track-select:hover {
+  background: rgba(29,233,182,.12);
 }
 .player-track:focus-visible {
   outline: 2px solid rgba(167,114,255,.72);
@@ -1262,12 +1334,31 @@ input[type="checkbox"] {
   background: linear-gradient(90deg, rgba(130,76,255,.45), rgba(55,42,94,.42));
   box-shadow: inset 0 0 0 1px rgba(167,114,255,.25);
 }
-.player-track-number {
+.player-track-thumbnail {
   display: grid;
   place-items: center;
-  color: #b8c1d4;
-  font-size: 15px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(101,111,140,.52);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(29,233,182,.18), transparent 45%),
+    linear-gradient(145deg, rgba(29,35,51,.95), rgba(8,13,23,.95));
+  color: #9aa5bd;
+  font-size: 19px;
   font-weight: 800;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+.player-track-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.player-track-thumbnail.has-image {
+  border-color: rgba(255,255,255,.1);
+  background: rgba(8,13,23,.9);
 }
 .player-track-info {
   min-width: 0;
@@ -1309,8 +1400,9 @@ input[type="checkbox"] {
   background: rgba(167,114,255,.2);
   color: #d7b8ff;
 }
-.player-track.active .player-track-number {
-  color: #b889ff;
+.player-track.active .player-track-thumbnail {
+  border-color: rgba(184,137,255,.56);
+  box-shadow: 0 0 0 2px rgba(167,114,255,.16);
 }
 .player-track-more {
   display: grid;
@@ -1581,7 +1673,8 @@ code {
   font-size: 13px;
   font-weight: 700;
 }
-.app-dialog-input {
+.app-dialog-input,
+.app-dialog-select {
   width: 100%;
   min-width: 0;
   background: rgba(11,14,22,.92);
@@ -1593,12 +1686,17 @@ code {
   outline: none;
   transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
 }
-.app-dialog-input:focus {
+.app-dialog-select {
+  cursor: pointer;
+}
+.app-dialog-input:focus,
+.app-dialog-select:focus {
   border-color: var(--accent2);
   box-shadow: 0 0 0 3px rgba(29,233,182,.12);
   background: rgba(15,18,27,.96);
 }
-.app-dialog-input[aria-invalid="true"] {
+.app-dialog-input[aria-invalid="true"],
+.app-dialog-select[aria-invalid="true"] {
   border-color: var(--danger);
   box-shadow: 0 0 0 3px rgba(255,82,82,.12);
 }
@@ -1790,6 +1888,14 @@ code {
   .player-list-toolbar {
     grid-template-columns: 1fr;
   }
+  .player-selection-bar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .player-selection-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
   .player-list-tools {
     justify-content: flex-start;
     flex-wrap: wrap;
@@ -1815,13 +1921,19 @@ code {
     max-height: min(520px, 60vh);
   }
   .player-track {
-    grid-template-columns: 42px minmax(0, 1fr) 70px 32px;
+    grid-template-columns: 44px minmax(0, 1fr) 70px 32px;
+  }
+  .player-track.is-selectable {
+    grid-template-columns: 28px 44px minmax(0, 1fr) 70px 32px;
   }
   .player-track-duration {
     display: none;
   }
   .player-track-action {
     grid-column: 3;
+  }
+  .player-track.is-selectable .player-track-action {
+    grid-column: 4;
   }
 }
 
@@ -1956,14 +2068,24 @@ code {
     grid-template-columns: 42px minmax(0, 1fr) 42px;
   }
   .player-track {
-    grid-template-columns: 34px minmax(0, 1fr) 58px 32px;
+    grid-template-columns: 42px minmax(0, 1fr) 58px 32px;
     padding: 14px;
+  }
+  .player-track.is-selectable {
+    grid-template-columns: 28px 42px minmax(0, 1fr) 58px 32px;
+  }
+  .player-track-thumbnail {
+    width: 40px;
+    height: 40px;
   }
   .player-track-duration {
     display: none;
   }
   .player-track-action {
     grid-column: 3;
+  }
+  .player-track.is-selectable .player-track-action {
+    grid-column: 4;
   }
 }
 
@@ -2037,9 +2159,17 @@ code {
     gap: 8px;
   }
   .player-track {
-    grid-template-columns: 28px minmax(0, 1fr) 32px;
+    grid-template-columns: 38px minmax(0, 1fr) 32px;
     gap: 10px;
     padding: 13px 12px;
+  }
+  .player-track.is-selectable {
+    grid-template-columns: 24px 38px minmax(0, 1fr) 32px;
+  }
+  .player-track-thumbnail {
+    width: 36px;
+    height: 36px;
+    border-radius: 7px;
   }
   .player-track-title {
     font-size: 13px;

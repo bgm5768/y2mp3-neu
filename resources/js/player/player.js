@@ -33,6 +33,8 @@ import {
   setActivePlaylist,
   createPlaylist,
   addTrackToPlaylist,
+  addTracksToPlaylist,
+  addKnownTrackIdsToPlaylist,
   removeTrackFromActivePlaylist
 } from './playlist.js';
 import { createTrackList } from './track-list.js';
@@ -234,7 +236,7 @@ function ensureTrackMenu() {
     if (action === 'rename') {
       void renameTrackFile(trackId);
     } else if (action === 'add-playlist') {
-      void addTrackToPlaylist(trackId);
+      void addTrackToPlaylist(trackId).then(result => autoplayAddedTrackIfIdle(result));
     } else if (action === 'remove-playlist') {
       removeTrackFromActivePlaylist(trackId);
     } else if (action === 'remove') {
@@ -272,6 +274,221 @@ function openTrackMenu(trackId, anchor) {
   document
     .querySelectorAll('.player-track-more')
     .forEach(button => button.setAttribute('aria-expanded', button === anchor ? 'true' : 'false'));
+}
+
+function selectedTrackIds() {
+  if (!(state.selectedTrackIds instanceof Set)) {
+    state.selectedTrackIds = new Set(Array.isArray(state.selectedTrackIds) ? state.selectedTrackIds : []);
+  }
+  return state.selectedTrackIds;
+}
+
+function toggleTrackSelection(trackId, selected) {
+  if (!trackId || activePlaylist()) return;
+  const ids = selectedTrackIds();
+  if (selected) ids.add(trackId);
+  else ids.delete(trackId);
+  renderList();
+}
+
+function setVisibleTrackSelection(selected) {
+  if (activePlaylist()) return;
+  const ids = selectedTrackIds();
+  document
+    .querySelectorAll('#player-list input[data-player-action="select-track"]')
+    .forEach(checkbox => {
+      const trackId = checkbox.dataset.trackId || '';
+      if (!trackId) return;
+      if (selected) ids.add(trackId);
+      else ids.delete(trackId);
+    });
+  renderList();
+}
+
+function clearTrackSelection() {
+  selectedTrackIds().clear();
+  renderList();
+}
+
+function normalizeTrackPathKey(path) {
+  return String(path || '').replace(/\//g, '\\').toLowerCase();
+}
+
+async function addSelectedTracksToPlaylist() {
+  const ids = [...selectedTrackIds()];
+  if (!ids.length) return;
+
+  const result = await addTracksToPlaylist(ids);
+  if (result?.addedCount) {
+    selectedTrackIds().clear();
+    renderList();
+    void autoplayAddedTrackIfIdle(result);
+  }
+}
+
+async function autoplayAddedTrackIfIdle(result, { requirePlayerTab = false } = {}) {
+  if (!result?.addedCount || !result.activePlaylistUpdated || !result.addedTrackIds?.length) return;
+  if (requirePlayerTab && !document.getElementById('tab-player')?.classList.contains('active')) return;
+  if (state.isLoadingTrack) return;
+
+  const audio = el('audio-player');
+  if (audio && !audio.paused) return;
+  if (!result.wasQueueEmpty && result.wasTrackSelected && audio?.src) return;
+
+  const addedIds = new Set(result.addedTrackIds);
+  const index = state.queue.findIndex(track => addedIds.has(track.id));
+  if (index < 0) return;
+
+  await loadTrack(index, true, { restorePosition: 0 });
+}
+
+function playlistOptions() {
+  return state.playlists.map(playlist => ({
+    id: playlist.id,
+    name: playlist.name,
+    count: playlist.trackIds.length
+  }));
+}
+
+async function addFilesToPlaylist(filePaths, playlistId) {
+  const paths = (Array.isArray(filePaths) ? filePaths : [filePaths]).filter(Boolean);
+  const playlist = state.playlists.find(item => item.id === playlistId);
+  if (!playlist || !paths.length) {
+    return { addedCount: 0, requestedCount: paths.length, foundCount: 0, playlistName: playlist?.name || '' };
+  }
+
+  await loadLibrary({ force: true });
+
+  const wanted = new Set(paths.map(normalizeTrackPathKey));
+  const trackIds = state.tracks
+    .filter(track => wanted.has(normalizeTrackPathKey(track.path)) || wanted.has(normalizeTrackPathKey(track.id)))
+    .map(track => track.id);
+
+  const result = addKnownTrackIdsToPlaylist(trackIds, playlistId, { silent: true });
+  render();
+  await autoplayAddedTrackIfIdle(result, { requirePlayerTab: true });
+  return {
+    ...result,
+    requestedCount: paths.length,
+    foundCount: trackIds.length
+  };
+}
+
+function tracksByIds(trackIds) {
+  const trackMap = new Map([...state.tracks, ...state.queue].map(track => [track.id, track]));
+  const seen = new Set();
+  return trackIds
+    .map(trackId => trackMap.get(trackId))
+    .filter(track => {
+      if (!track || seen.has(track.id)) return false;
+      seen.add(track.id);
+      return true;
+    });
+}
+
+function selectedTracksDeleteDetail(tracks) {
+  const names = tracks
+    .slice(0, 8)
+    .map(track => `- ${track.fileName || fileName(track.path)}`);
+  if (tracks.length > names.length) names.push(`외 ${tracks.length - names.length}곡`);
+  return [
+    '이 작업은 선택한 실제 음악 파일을 삭제합니다. 삭제 후 되돌릴 수 없습니다.',
+    '',
+    ...names
+  ].join('\n');
+}
+
+async function confirmRemoveTracks(tracks) {
+  if (tracks.length === 1) return confirmRemoveTrack(tracks[0]);
+  return Dialog.confirm({
+    title: '선택한 음악 파일 삭제',
+    message: `${tracks.length}곡을 삭제할까요?`,
+    detail: selectedTracksDeleteDetail(tracks),
+    confirmText: '삭제',
+    danger: true
+  });
+}
+
+function removeDeletedTracksFromState(deletedIds, preserveId = '') {
+  const deletedSet = new Set(deletedIds);
+  deletedSet.forEach(trackId => {
+    state.metadataPromises.delete(trackId);
+    state.streamInfoPromises.delete(trackId);
+    if (state.thumbnailHydrationTrackIds instanceof Set) state.thumbnailHydrationTrackIds.delete(trackId);
+    const cachedCover = state.listCoverObjectUrls instanceof Map ? state.listCoverObjectUrls.get(trackId) : null;
+    if (cachedCover?.url) URL.revokeObjectURL(cachedCover.url);
+    if (state.listCoverObjectUrls instanceof Map) state.listCoverObjectUrls.delete(trackId);
+  });
+
+  state.playlists = state.playlists.map(playlist => ({
+    ...playlist,
+    trackIds: playlist.trackIds.filter(trackId => !deletedSet.has(trackId))
+  }));
+  state.tracks = state.tracks.filter(item => !deletedSet.has(item.id));
+  state.queue = sortTracks(playlistSourceTracks());
+  state.queuePosition = preserveId
+    ? state.queue.findIndex(item => item.id === preserveId)
+    : -1;
+  if (state.queuePosition < 0 && preserveId && state.queue.length) state.queuePosition = 0;
+  deletedSet.forEach(trackId => selectedTrackIds().delete(trackId));
+}
+
+async function removeSelectedTrackFiles() {
+  const tracks = tracksByIds([...selectedTrackIds()]);
+  if (!tracks.length) return;
+  if (!(await confirmRemoveTracks(tracks))) return;
+
+  const audio = el('audio-player');
+  const current = currentTrack();
+  const deletingCurrent = tracks.some(track => track.id === current?.id);
+  const preserveId = deletingCurrent ? '' : current?.id || '';
+  const deletedIds = [];
+  const failures = [];
+
+  try {
+    if (deletingCurrent && audio) {
+      state.trackLoadToken += 1;
+      clearAudioSource(audio);
+    }
+
+    for (const track of tracks) {
+      try {
+        await Neutralino.filesystem.remove(track.path);
+        deletedIds.push(track.id);
+      } catch (e) {
+        failures.push({ track, error: e });
+      }
+    }
+
+    if (deletedIds.length) {
+      removeDeletedTracksFromState(deletedIds, preserveId);
+      if (deletingCurrent && deletedIds.includes(current?.id)) {
+        savePlayerSettings({
+          playerLastTrackId: '',
+          playerLastTrackPath: '',
+          playerLastPosition: 0,
+          playerLastDuration: 0
+        }, { immediate: true });
+      }
+      render();
+      renderPlaylistDropdown();
+      savePlaylists();
+    }
+
+    if (failures.length) {
+      Toast.show(`${deletedIds.length}곡 삭제, ${failures.length}곡 실패했습니다.`, 'error', 7000);
+      if (deletingCurrent && failures.some(({ track }) => track.id === current?.id)) {
+        void loadLibrary({ force: true });
+      }
+      renderList();
+      return;
+    }
+
+    Toast.show(`${deletedIds.length}곡을 삭제하고 목록에서 제거했습니다.`, 'success', 4500);
+  } catch (e) {
+    Toast.show(`선택한 파일을 삭제하지 못했습니다: ${e.message || e}`, 'error', 7000);
+    if (deletingCurrent) void loadLibrary({ force: true });
+  }
 }
 
 function updateTrackPath(oldId, nextPath, oldTitle) {
@@ -984,7 +1201,39 @@ function init() {
     state.isSeeking = false;
   });
   const listDom = ensureListDom().list;
+  el('tab-player')?.addEventListener('change', e => {
+    const selectAll = e.target.closest('[data-player-selection-action="toggle-all"]');
+    if (selectAll) {
+      setVisibleTrackSelection(selectAll.checked);
+      return;
+    }
+
+    const checkbox = e.target.closest('input[data-player-action="select-track"]');
+    if (checkbox) {
+      toggleTrackSelection(checkbox.dataset.trackId || '', checkbox.checked);
+    }
+  });
+  el('tab-player')?.addEventListener('click', e => {
+    const actionButton = e.target.closest('button[data-player-selection-action]');
+    if (!actionButton) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    const action = actionButton.dataset.playerSelectionAction;
+    if (action === 'add-selected') {
+      void addSelectedTracksToPlaylist();
+    } else if (action === 'delete-selected') {
+      void removeSelectedTrackFiles();
+    } else if (action === 'clear') {
+      clearTrackSelection();
+    }
+  });
   listDom?.addEventListener('click', e => {
+    if (e.target.closest('.player-track-select')) {
+      e.stopPropagation();
+      return;
+    }
+
     const menuButton = e.target.closest('button[data-player-action="menu"]');
     if (menuButton) {
       e.preventDefault();
@@ -1004,7 +1253,7 @@ function init() {
     void loadTrack(Number(item.dataset.index), true);
   });
   listDom?.addEventListener('keydown', e => {
-    if (e.target.closest('button')) return;
+    if (e.target.closest('button, input, label')) return;
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const item = e.target.closest('.player-track');
     if (!item) return;
@@ -1084,6 +1333,7 @@ export function createPlayer(dependencies = {}) {
     formatBytes,
     metadataLine,
     metadataPairs,
+    ensureTrackMetadata,
     savePlayerSettings,
     rebuildQueue,
     activePlaylist,
@@ -1094,5 +1344,5 @@ export function createPlayer(dependencies = {}) {
     sortDirectionLabel
   });
 
-  return { init, loadLibrary, invalidate };
+  return { init, loadLibrary, invalidate, playlistOptions, addFilesToPlaylist };
 }

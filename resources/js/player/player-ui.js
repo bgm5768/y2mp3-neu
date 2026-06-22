@@ -15,6 +15,7 @@ let formatTime = seconds => String(seconds || 0);
 let formatBytes = size => String(size || '');
 let metadataLine = () => '';
 let metadataPairs = () => [];
+let ensureTrackMetadata = async track => track;
 let savePlayerSettings = () => {};
 let rebuildQueue = () => {};
 let activePlaylist = () => null;
@@ -32,6 +33,7 @@ export function configurePlayerUi(deps = {}) {
   formatBytes = deps.formatBytes || formatBytes;
   metadataLine = deps.metadataLine || metadataLine;
   metadataPairs = deps.metadataPairs || metadataPairs;
+  ensureTrackMetadata = deps.ensureTrackMetadata || ensureTrackMetadata;
   savePlayerSettings = deps.savePlayerSettings || savePlayerSettings;
   rebuildQueue = deps.rebuildQueue || rebuildQueue;
   activePlaylist = deps.activePlaylist || activePlaylist;
@@ -140,11 +142,160 @@ export function ensureListDom() {
     tab.appendChild(list);
   }
 
+  const header = tab?.querySelector('.player-list-header');
+  if (!el('player-selection-bar') && header) {
+    const selectionBar = document.createElement('div');
+    selectionBar.id = 'player-selection-bar';
+    selectionBar.className = 'player-selection-bar hidden';
+
+    const selectAllLabel = document.createElement('label');
+    selectAllLabel.className = 'player-select-all';
+    const selectAll = document.createElement('input');
+    selectAll.id = 'player-select-all';
+    selectAll.type = 'checkbox';
+    selectAll.dataset.playerSelectionAction = 'toggle-all';
+    const selectAllText = document.createElement('span');
+    selectAllText.textContent = '전체 선택';
+    selectAllLabel.append(selectAll, selectAllText);
+
+    const status = document.createElement('span');
+    status.id = 'player-selection-status';
+    status.className = 'player-selection-status';
+    status.textContent = '';
+
+    const actions = document.createElement('div');
+    actions.className = 'player-selection-actions';
+    const addButton = document.createElement('button');
+    addButton.id = 'player-selection-add-btn';
+    addButton.type = 'button';
+    addButton.className = 'btn btn-primary btn-sm';
+    addButton.dataset.playerSelectionAction = 'add-selected';
+    addButton.textContent = '플레이리스트에 추가';
+    const deleteButton = document.createElement('button');
+    deleteButton.id = 'player-selection-delete-btn';
+    deleteButton.type = 'button';
+    deleteButton.className = 'btn btn-danger btn-sm';
+    deleteButton.dataset.playerSelectionAction = 'delete-selected';
+    deleteButton.textContent = '선택 삭제';
+    const clearButton = document.createElement('button');
+    clearButton.id = 'player-selection-clear-btn';
+    clearButton.type = 'button';
+    clearButton.className = 'btn btn-ghost btn-sm';
+    clearButton.dataset.playerSelectionAction = 'clear';
+    clearButton.textContent = '선택 해제';
+    actions.append(addButton, deleteButton, clearButton);
+
+    selectionBar.append(selectAllLabel, status, actions);
+    header.appendChild(selectionBar);
+  }
+
   return {
     list: el('player-list'),
     empty: el('player-empty'),
     summary: el('player-summary')
   };
+}
+
+function ensureSelectionSet() {
+  if (state.selectedTrackIds instanceof Set) return state.selectedTrackIds;
+  state.selectedTrackIds = new Set(Array.isArray(state.selectedTrackIds) ? state.selectedTrackIds : []);
+  return state.selectedTrackIds;
+}
+
+function updateSelectionBar(canSelect, filteredTracks) {
+  const selectionBar = el('player-selection-bar');
+  if (!selectionBar) return;
+
+  const selectedIds = ensureSelectionSet();
+  selectionBar.classList.toggle('hidden', !canSelect);
+  if (!canSelect) {
+    selectedIds.clear();
+    return;
+  }
+
+  const visibleIds = filteredTracks.map(({ track }) => track.id);
+  const selectedCount = selectedIds.size;
+  const selectedVisibleCount = visibleIds.filter(id => selectedIds.has(id)).length;
+  const selectAll = el('player-select-all');
+  const status = el('player-selection-status');
+  const addButton = el('player-selection-add-btn');
+  const deleteButton = el('player-selection-delete-btn');
+  const clearButton = el('player-selection-clear-btn');
+
+  if (selectAll) {
+    selectAll.disabled = visibleIds.length === 0;
+    selectAll.checked = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+    selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length;
+  }
+  if (status) {
+    status.textContent = selectedCount
+      ? `${selectedCount}곡 선택됨`
+      : '';
+  }
+  if (addButton) {
+    addButton.disabled = selectedCount === 0 || state.playlists.length === 0;
+    addButton.title = state.playlists.length ? '' : '먼저 플레이리스트를 만들어 주세요.';
+  }
+  if (deleteButton) deleteButton.disabled = selectedCount === 0;
+  if (clearButton) clearButton.disabled = selectedCount === 0;
+}
+
+function ensureThumbnailCache() {
+  if (state.listCoverObjectUrls instanceof Map) return state.listCoverObjectUrls;
+  state.listCoverObjectUrls = new Map();
+  return state.listCoverObjectUrls;
+}
+
+function ensureThumbnailHydrationSet() {
+  if (state.thumbnailHydrationTrackIds instanceof Set) return state.thumbnailHydrationTrackIds;
+  state.thumbnailHydrationTrackIds = new Set(Array.isArray(state.thumbnailHydrationTrackIds) ? state.thumbnailHydrationTrackIds : []);
+  return state.thumbnailHydrationTrackIds;
+}
+
+function trackThumbnailUrl(track) {
+  if (!track?.cover?.data?.length) return '';
+
+  const cache = ensureThumbnailCache();
+  const key = `${track.id}:${track.cover.mime || 'image/jpeg'}:${track.cover.data.length}`;
+  const cached = cache.get(track.id);
+  if (cached?.key === key) return cached.url;
+
+  if (cached?.url) URL.revokeObjectURL(cached.url);
+  const url = URL.createObjectURL(new Blob([track.cover.data], { type: track.cover.mime || 'image/jpeg' }));
+  cache.set(track.id, { key, url });
+  return url;
+}
+
+function purgeUnusedThumbnailUrls(visibleTrackIds) {
+  const cache = ensureThumbnailCache();
+  for (const [trackId, cached] of cache.entries()) {
+    if (visibleTrackIds.has(trackId)) continue;
+    if (cached?.url) URL.revokeObjectURL(cached.url);
+    cache.delete(trackId);
+  }
+}
+
+function hydrateVisibleThumbnails(filteredTracks) {
+  const hydrating = ensureThumbnailHydrationSet();
+  const targets = filteredTracks
+    .map(({ track }) => track)
+    .filter(track => track && !track.metadataLoaded && !hydrating.has(track.id))
+    .slice(0, 30);
+
+  if (!targets.length) return;
+  targets.forEach(track => hydrating.add(track.id));
+
+  void Promise.all(targets.map(async track => {
+    try {
+      await ensureTrackMetadata(track);
+    } catch {
+      track.metadataLoaded = true;
+    } finally {
+      hydrating.delete(track.id);
+    }
+  })).then(() => {
+    renderList();
+  });
 }
 
 export function setCurrentArtwork(track) {
@@ -266,6 +417,15 @@ export function renderList() {
       return [track.title, track.fileName]
         .some(value => String(value || '').toLowerCase().includes(query));
     });
+  const canSelectTracks = !playlist && sourceTracks.length > 0;
+  const selectedIds = ensureSelectionSet();
+  const sourceIds = new Set(sourceTracks.map(track => track.id));
+  [...selectedIds].forEach(trackId => {
+    if (!canSelectTracks || !sourceIds.has(trackId)) selectedIds.delete(trackId);
+  });
+  updateSelectionBar(canSelectTracks, filteredTracks);
+  purgeUnusedThumbnailUrls(new Set(filteredTracks.map(({ track }) => track.id)));
+  hydrateVisibleThumbnails(filteredTracks);
 
   if (empty) {
     empty.classList.toggle('hidden', sourceTracks.length > 0 && filteredTracks.length > 0);
@@ -284,14 +444,41 @@ export function renderList() {
   filteredTracks.forEach(({ track, index }) => {
     const item = document.createElement('div');
     item.className = `player-track ${index === state.queuePosition ? 'active' : ''}`;
+    const isSelected = selectedIds.has(track.id);
+    item.classList.toggle('is-selectable', canSelectTracks);
+    item.classList.toggle('is-selected', isSelected);
     item.dataset.index = String(index);
     item.dataset.trackId = track.id;
     item.setAttribute('role', 'button');
+    item.setAttribute('aria-selected', isSelected ? 'true' : 'false');
     item.tabIndex = 0;
 
-    const number = document.createElement('span');
-    number.className = 'player-track-number';
-    number.textContent = String(index + 1).padStart(2, '0');
+    if (canSelectTracks) {
+      const selectLabel = document.createElement('label');
+      selectLabel.className = 'player-track-select';
+      selectLabel.title = `${track.title || track.fileName} 선택`;
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = isSelected;
+      checkbox.dataset.playerAction = 'select-track';
+      checkbox.dataset.trackId = track.id;
+      checkbox.setAttribute('aria-label', `${track.title || track.fileName} 선택`);
+      selectLabel.appendChild(checkbox);
+      item.appendChild(selectLabel);
+    }
+
+    const thumbnail = document.createElement('span');
+    thumbnail.className = 'player-track-thumbnail';
+    const thumbnailUrl = trackThumbnailUrl(track);
+    if (thumbnailUrl) {
+      const img = document.createElement('img');
+      img.src = thumbnailUrl;
+      img.alt = '';
+      thumbnail.appendChild(img);
+      thumbnail.classList.add('has-image');
+    } else {
+      thumbnail.textContent = '♪';
+    }
 
     const info = document.createElement('span');
     info.className = 'player-track-info';
@@ -324,7 +511,7 @@ export function renderList() {
     more.setAttribute('aria-expanded', state.openMenuTrackId === track.id ? 'true' : 'false');
     more.textContent = '⋮';
 
-    item.append(number, info, duration, action, more);
+    item.append(thumbnail, info, duration, action, more);
     list.appendChild(item);
   });
 }

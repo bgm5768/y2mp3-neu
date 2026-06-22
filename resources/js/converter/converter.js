@@ -60,6 +60,7 @@ export function createConverter({
   function updateConvertButton() {
     const btn = document.getElementById('convert-btn');
     if (!btn) return;
+    renderPostConvertPlaylistOptions();
     if (!DependencyUI.depsReady()) {
       btn.textContent = '의존성 도구 설치 필요';
       btn.disabled = true;
@@ -94,11 +95,43 @@ export function createConverter({
     input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
   }
 
+  function renderPostConvertPlaylistOptions() {
+    const select = document.getElementById('post-convert-playlist-select');
+    const hint = document.getElementById('post-convert-playlist-hint');
+    if (!select) return;
+
+    const previous = select.value;
+    const playlists = getPlayer()?.playlistOptions?.() || [];
+    select.innerHTML = '';
+
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = '플레이리스트에 추가 안 함';
+    select.appendChild(none);
+
+    playlists.forEach(playlist => {
+      const option = document.createElement('option');
+      option.value = playlist.id;
+      option.textContent = `${playlist.name} (${playlist.count}곡)`;
+      select.appendChild(option);
+    });
+
+    select.value = playlists.some(playlist => playlist.id === previous) ? previous : '';
+    select.disabled = appState.isQueueRunning;
+
+    if (hint) {
+      hint.textContent = playlists.length
+        ? '선택하면 완료된 파일이 변환 후 자동으로 추가됩니다.'
+        : '플레이어 탭에서 플레이리스트를 만들면 여기서 선택할 수 있습니다.';
+    }
+  }
+
   function getConversionOptions() {
     const settings = Settings.get();
     return {
       quality: document.getElementById('quality-select').value,
       format: document.getElementById('format-select').value,
+      postConvertPlaylistId: document.getElementById('post-convert-playlist-select')?.value || '',
       embedThumb: true,
       embedMeta: true,
       savePath: Settings.getActiveSavePath(),
@@ -280,6 +313,7 @@ export function createConverter({
     let errorCount = 0;
     let cancelledCount = 0;
     let lastFilePath = '';
+    const completedFilePaths = [];
 
     try {
       await ensureRequiredToolsInstalled();
@@ -294,6 +328,7 @@ export function createConverter({
         if (result === 'done') {
           doneCount += 1;
           lastFilePath = latest?.filePath || lastFilePath;
+          if (latest?.filePath) completedFilePaths.push(latest.filePath);
         } else if (result === 'cancelled') {
           cancelledCount += 1;
         } else if (result === 'error') {
@@ -315,12 +350,40 @@ export function createConverter({
       appState.isQueueRunning = false;
       updateUrlAnalysisView();
       QueueUI.render();
+      renderPostConvertPlaylistOptions();
     }
 
+    let playlistAddResult = null;
     if (doneCount > 0) {
-      getPlayer()?.invalidate();
+      if (options.postConvertPlaylistId) {
+        try {
+          const player = getPlayer();
+          if (player?.addFilesToPlaylist) {
+            playlistAddResult = await player.addFilesToPlaylist(completedFilePaths, options.postConvertPlaylistId);
+          } else {
+            getPlayer()?.invalidate();
+          }
+        } catch (e) {
+          Toast.show(`플레이리스트 자동 추가 실패: ${e.message || e}`, 'warning', 7000);
+          getPlayer()?.invalidate();
+        }
+      } else {
+        getPlayer()?.invalidate();
+      }
+
+      if (options.postConvertPlaylistId && playlistAddResult && playlistAddResult.addedCount === 0) {
+        const reason = playlistAddResult.foundCount === 0
+          ? '변환 파일을 플레이어 목록에서 찾지 못했습니다.'
+          : '변환 파일이 이미 선택한 플레이리스트에 있습니다.';
+        Toast.show(`플레이리스트 자동 추가 안 됨: ${reason}`, 'warning', 6000);
+      }
+
+      const playlistText = playlistAddResult?.addedCount
+        ? ` · ${playlistAddResult.playlistName}에 ${playlistAddResult.addedCount}곡 추가`
+        : '';
+      renderPostConvertPlaylistOptions();
       Toast.show(
-        doneCount === 1 ? '다운로드 완료' : `${doneCount}개 다운로드 완료`,
+        `${doneCount === 1 ? '다운로드 완료' : `${doneCount}개 다운로드 완료`}${playlistText}`,
         'success',
         3000,
         lastFilePath ? { label: '저장 폴더 열기', onClick: () => openContainingFolder(lastFilePath) } : null
@@ -427,6 +490,7 @@ ${text}` : text;
         Toast.show('클립보드 읽기 실패', 'error');
       }
     });
+    document.getElementById('post-convert-playlist-select')?.addEventListener('focus', renderPostConvertPlaylistOptions);
 
     document.getElementById('convert-btn').addEventListener('click', beginConvert);
     document.getElementById('queue-list').addEventListener('click', handleQueueAction);
@@ -444,6 +508,7 @@ ${text}` : text;
     });
 
     resizeUrlInput();
+    renderPostConvertPlaylistOptions();
     updateUrlAnalysisView();
     QueueUI.render();
   }
