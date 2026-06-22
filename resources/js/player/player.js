@@ -919,28 +919,35 @@ async function seekTo(time) {
   updateProgress();
 }
 
+function nextQueueIndex({ wrap = true } = {}) {
+  const count = state.queue.length;
+  if (!count) return -1;
+  if (state.queuePosition < 0 || state.queuePosition >= count) return 0;
+  if (state.queuePosition < count - 1) return state.queuePosition + 1;
+  return wrap ? 0 : -1;
+}
+
+function previousQueueIndex({ wrap = true } = {}) {
+  const count = state.queue.length;
+  if (!count) return -1;
+  if (state.queuePosition < 0 || state.queuePosition >= count) return wrap ? count - 1 : 0;
+  if (state.queuePosition > 0) return state.queuePosition - 1;
+  return wrap ? count - 1 : 0;
+}
+
 function hasNext() {
-  return state.queuePosition >= 0 && state.queuePosition < state.queue.length - 1;
+  return nextQueueIndex({ wrap: false }) >= 0;
 }
 
 async function next({ fromEnded = false } = {}) {
   if (!state.queue.length) return;
-  if (hasNext()) {
-    await loadTrack(state.queuePosition + 1, true);
+  const shouldWrap = !fromEnded || state.repeatMode === 'repeat-queue';
+  const index = nextQueueIndex({ wrap: shouldWrap });
+  if (index < 0) {
+    pause();
     return;
   }
-
-  if (fromEnded && state.repeatMode === 'repeat-queue') {
-    await loadTrack(0, true);
-    return;
-  }
-
-  if (!fromEnded && state.repeatMode === 'repeat-queue') {
-    await loadTrack(0, true);
-    return;
-  }
-
-  pause();
+  await loadTrack(index, true);
 }
 
 async function previous() {
@@ -951,9 +958,7 @@ async function previous() {
     audio.currentTime = 0;
     return;
   }
-  const prevIndex = state.queuePosition > 0
-    ? state.queuePosition - 1
-    : (state.repeatMode === 'repeat-queue' ? state.queue.length - 1 : 0);
+  const prevIndex = previousQueueIndex();
   await loadTrack(prevIndex, true);
 }
 
