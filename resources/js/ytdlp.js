@@ -30,10 +30,51 @@ const YTDlp = (() => {
     return Neutralino.os.execCommand(String(cmd), { background });
   }
 
+  let activeDownloadPid = 0;
+
   async function cancelActiveDownload() {
     try {
-      await runCmd('cmd /c "taskkill /F /IM yt-dlp.exe /T >nul 2>&1 & taskkill /F /IM ffmpeg.exe /T >nul 2>&1"', true);
+      const killByPid = activeDownloadPid
+        ? `taskkill /F /T /PID ${activeDownloadPid} >nul 2>&1`
+        : '';
+      const killTools = 'taskkill /F /IM yt-dlp.exe /T >nul 2>&1 & taskkill /F /IM ffmpeg.exe /T >nul 2>&1';
+      const command = ['cmd /c "', killByPid, killByPid ? ' & ' : '', killTools, '"'].join('');
+      await runCmd(command, true);
     } catch (e) { /* best effort */ }
+  }
+
+  async function readExitCode(exitPath) {
+    try {
+      const value = String(await Neutralino.filesystem.readFile(exitPath) || '').trim();
+      const match = value.match(/-?\d+/);
+      return match ? Number(match[0]) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function runCmdInBackground(command, exitPath, signal) {
+    const spawned = await runCmd(command, true);
+    activeDownloadPid = Number(spawned?.pid) || 0;
+
+    while (true) {
+      if (signal && signal.aborted) {
+        await cancelActiveDownload();
+        throw new Error('CANCELLED');
+      }
+
+      const exitCode = await readExitCode(exitPath);
+      if (exitCode !== null) {
+        return {
+          pid: activeDownloadPid,
+          stdOut: '',
+          stdErr: '',
+          exitCode
+        };
+      }
+
+      await sleep(300);
+    }
   }
 
   // ────────────────────────────────────────────────────────────────
@@ -336,13 +377,16 @@ const YTDlp = (() => {
     // CMD가 .cmd를 실행할 때 %% → % 로 복원되므로 yt-dlp는 %(title)s 를 받게 됨
     const cmdLine = `${ytdlpCmd} > "${log}" 2>&1`;
     const escapedLine = cmdLine.replace(/%/g, '%%');
+    const exitPath = `${tempDir}\\_exit_${Date.now()}.txt`;
     const scriptContent = [
       '@echo off',
       'chcp 65001 >nul',
       'set PYTHONUTF8=1',
       'set PYTHONIOENCODING=utf-8',
       escapedLine,
-      'exit /b %ERRORLEVEL%'
+      'set "_YTMP3_EXIT=%ERRORLEVEL%"',
+      `> "${exitPath}" echo %_YTMP3_EXIT%`,
+      'exit /b %_YTMP3_EXIT%'
     ].join('\r\n') + '\r\n';
 
     const scriptPath = `${tempDir}\\_run_${Date.now()}.cmd`;
@@ -400,7 +444,7 @@ const YTDlp = (() => {
 
       if (signal && signal.aborted) throw new Error('CANCELLED');
 
-      const commandPromise = runCmd(`cmd /c "${scriptPath}"`, false);
+      const commandPromise = runCmdInBackground(`cmd /c "${scriptPath}"`, exitPath, signal);
       commandPromise.catch(() => {});
 
       let r = null;
@@ -430,6 +474,7 @@ const YTDlp = (() => {
 
       // 스크립트 정리
       try { await Neutralino.filesystem.removeFile(scriptPath); } catch (e) { /* ignored */ }
+      try { await Neutralino.filesystem.removeFile(exitPath); } catch (e) { /* ignored */ }
 
       // 최종 로그 읽기 및 오류 확인
       let finalLog = '';
@@ -453,7 +498,10 @@ const YTDlp = (() => {
     } catch (e) {
       stopPolling();
       try { await Neutralino.filesystem.removeFile(scriptPath); } catch (_) { /* ignored */ }
+      try { await Neutralino.filesystem.removeFile(exitPath); } catch (_) { /* ignored */ }
       throw e;
+    } finally {
+      activeDownloadPid = 0;
     }
   }
 

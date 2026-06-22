@@ -284,6 +284,25 @@ export function createConverter({
     }
   }
 
+  async function syncCompletedFileWithPlayer(filePath, options) {
+    if (!filePath) return { addedCount: 0, foundCount: 0, playlistName: '' };
+
+    const player = getPlayer();
+    if (!player) return { addedCount: 0, foundCount: 0, playlistName: '' };
+
+    if (options.postConvertPlaylistId && player.addFilesToPlaylist) {
+      return player.addFilesToPlaylist([filePath], options.postConvertPlaylistId);
+    }
+
+    if (typeof player.loadLibrary === 'function') {
+      await player.loadLibrary({ force: true });
+    } else {
+      player.invalidate?.();
+    }
+
+    return { addedCount: 0, foundCount: 0, playlistName: '' };
+  }
+
   async function runQueue(ids = null) {
     if (appState.isQueueRunning) {
       Toast.show('이미 변환이 진행 중입니다.', 'warning');
@@ -313,7 +332,11 @@ export function createConverter({
     let errorCount = 0;
     let cancelledCount = 0;
     let lastFilePath = '';
-    const completedFilePaths = [];
+    let playlistAddedCount = 0;
+    let playlistName = '';
+    let playlistNotFoundCount = 0;
+    let playlistDuplicateCount = 0;
+    let playerSyncErrorCount = 0;
 
     try {
       await ensureRequiredToolsInstalled();
@@ -327,8 +350,26 @@ export function createConverter({
         const latest = Queue.getById(item.id);
         if (result === 'done') {
           doneCount += 1;
-          lastFilePath = latest?.filePath || lastFilePath;
-          if (latest?.filePath) completedFilePaths.push(latest.filePath);
+          const filePath = latest?.filePath || '';
+          lastFilePath = filePath || lastFilePath;
+
+          try {
+            const syncResult = await syncCompletedFileWithPlayer(filePath, options);
+            playlistAddedCount += Number(syncResult?.addedCount) || 0;
+            playlistName = syncResult?.playlistName || playlistName;
+            if (options.postConvertPlaylistId) {
+              if ((Number(syncResult?.foundCount) || 0) === 0) {
+                playlistNotFoundCount += 1;
+              } else if ((Number(syncResult?.addedCount) || 0) === 0) {
+                playlistDuplicateCount += 1;
+              }
+            }
+            renderPostConvertPlaylistOptions();
+          } catch (e) {
+            playerSyncErrorCount += 1;
+            Toast.show(`플레이어 목록 갱신 실패: ${e.message || e}`, 'warning', 7000);
+            getPlayer()?.invalidate?.();
+          }
         } else if (result === 'cancelled') {
           cancelledCount += 1;
         } else if (result === 'error') {
@@ -353,33 +394,25 @@ export function createConverter({
       renderPostConvertPlaylistOptions();
     }
 
-    let playlistAddResult = null;
     if (doneCount > 0) {
-      if (options.postConvertPlaylistId) {
-        try {
-          const player = getPlayer();
-          if (player?.addFilesToPlaylist) {
-            playlistAddResult = await player.addFilesToPlaylist(completedFilePaths, options.postConvertPlaylistId);
-          } else {
-            getPlayer()?.invalidate();
-          }
-        } catch (e) {
-          Toast.show(`플레이리스트 자동 추가 실패: ${e.message || e}`, 'warning', 7000);
-          getPlayer()?.invalidate();
-        }
-      } else {
-        getPlayer()?.invalidate();
-      }
-
-      if (options.postConvertPlaylistId && playlistAddResult && playlistAddResult.addedCount === 0) {
-        const reason = playlistAddResult.foundCount === 0
+      if (options.postConvertPlaylistId && playlistAddedCount === 0) {
+        const reason = playlistNotFoundCount > 0
           ? '변환 파일을 플레이어 목록에서 찾지 못했습니다.'
           : '변환 파일이 이미 선택한 플레이리스트에 있습니다.';
         Toast.show(`플레이리스트 자동 추가 안 됨: ${reason}`, 'warning', 6000);
+      } else if (options.postConvertPlaylistId && (playlistNotFoundCount > 0 || playlistDuplicateCount > 0)) {
+        const parts = [];
+        if (playlistNotFoundCount > 0) parts.push(`미반영 ${playlistNotFoundCount}곡`);
+        if (playlistDuplicateCount > 0) parts.push(`중복 ${playlistDuplicateCount}곡`);
+        Toast.show(`플레이리스트 일부 자동 추가 제외: ${parts.join(', ')}`, 'warning', 6000);
       }
 
-      const playlistText = playlistAddResult?.addedCount
-        ? ` · ${playlistAddResult.playlistName}에 ${playlistAddResult.addedCount}곡 추가`
+      if (playerSyncErrorCount > 0) {
+        Toast.show(`플레이어 갱신 실패 항목 ${playerSyncErrorCount}개가 있습니다.`, 'warning', 6000);
+      }
+
+      const playlistText = playlistAddedCount
+        ? ` · ${playlistName}에 ${playlistAddedCount}곡 추가`
         : '';
       renderPostConvertPlaylistOptions();
       Toast.show(
