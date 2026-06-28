@@ -328,7 +328,7 @@ const YTDlp = (() => {
 
     const normalizedUrl = String(url || '').trim();
     if (!/^https?:\/\/\S+/i.test(normalizedUrl)) {
-      throw new Error('YouTube URL을 다시 확인해 주세요.');
+      throw new Error('URL을 다시 확인해 주세요.');
     }
 
     const yd   = await ytdlpExe();
@@ -505,6 +505,187 @@ const YTDlp = (() => {
     }
   }
 
+  function videoFormatSelector(quality, outputFormat) {
+    const maxHeight = ['1080', '720', '480'].includes(String(quality)) ? String(quality) : '';
+    const heightFilter = maxHeight ? `[height<=${maxHeight}]` : '';
+    const fallback = maxHeight ? `/best[height<=${maxHeight}]/best` : '/best';
+
+    if (outputFormat === 'mp4') {
+      return `bv*${heightFilter}[ext=mp4]+ba[ext=m4a]/b${heightFilter}[ext=mp4]${fallback}`;
+    }
+
+    if (outputFormat === 'webm') {
+      return `bv*${heightFilter}[ext=webm]+ba[ext=webm]/b${heightFilter}[ext=webm]${fallback}`;
+    }
+
+    return `bv*${heightFilter}+ba/b${heightFilter}${fallback}`;
+  }
+
+  async function downloadVideo({ url, videoQuality, format, savePath,
+                                proxy, rateLimit, onProgress, signal }) {
+
+    const normalizedUrl = String(url || '').trim();
+    if (!/^https?:\/\/\S+/i.test(normalizedUrl)) {
+      throw new Error('URL을 다시 확인해 주세요.');
+    }
+
+    const outputFormat = ['mp4', 'mkv', 'webm'].includes(String(format || '').toLowerCase())
+      ? String(format).toLowerCase()
+      : 'mp4';
+    const yd = await ytdlpExe();
+    const ff = await ffmpegExe();
+    const tempDir = await tempWorkDir();
+    const log = `${tempDir}\\_video_progress.log`;
+    const startedAt = Date.now();
+    const videoExts = /\.(mp4|mkv|webm|mov|avi|m4v)$/i;
+
+    await cleanupTempScripts(tempDir);
+
+    try { await Neutralino.filesystem.removeFile(log); } catch (e) { /* 없으면 무시 */ }
+
+    onProgress && onProgress(3, '', '준비 중', 'download');
+
+    const outTemplate = savePath.replace(/\\/g, '/') + '/%(title)s.%(ext)s';
+    const args = [
+      `-f "${videoFormatSelector(videoQuality, outputFormat)}"`,
+      `--ffmpeg-location "${ff}"`,
+      `--merge-output-format "${outputFormat}"`,
+      `-o "${outTemplate}"`,
+      `--no-playlist`,
+      `--newline`,
+      `--progress`,
+      `--encoding utf-8`,
+      `--add-metadata`
+    ];
+
+    if (proxy) args.push(`--proxy "${proxy}"`);
+    if (rateLimit) args.push(`-r ${rateLimit}`);
+
+    const ytdlpCmd = `"${yd}" ${args.join(' ')} "${normalizedUrl}"`;
+    const cmdLine = `${ytdlpCmd} > "${log}" 2>&1`;
+    const escapedLine = cmdLine.replace(/%/g, '%%');
+    const exitPath = `${tempDir}\\_video_exit_${Date.now()}.txt`;
+    const scriptContent = [
+      '@echo off',
+      'chcp 65001 >nul',
+      'set PYTHONUTF8=1',
+      'set PYTHONIOENCODING=utf-8',
+      escapedLine,
+      'set "_YTMP3_EXIT=%ERRORLEVEL%"',
+      `> "${exitPath}" echo %_YTMP3_EXIT%`,
+      'exit /b %_YTMP3_EXIT%'
+    ].join('\r\n') + '\r\n';
+
+    const scriptPath = `${tempDir}\\_run_video_${Date.now()}.cmd`;
+    let pollTimer = null;
+    let activityTimer = null;
+    let lastPct = -1;
+    let warmupPct = 3;
+    let currentPhase = 'download';
+
+    function reportProgress(pct, speed, eta, phase) {
+      currentPhase = phase || currentPhase;
+      const safePct = Math.max(0, Math.min(100, Number(pct) || 0));
+      if (safePct !== lastPct || currentPhase === 'convert' || speed || eta) {
+        lastPct = safePct;
+        onProgress && onProgress(safePct, speed || '', eta || '', currentPhase);
+      }
+    }
+
+    function startActivityPulse() {
+      activityTimer = setInterval(() => {
+        if (signal && signal.aborted) return;
+        if (currentPhase === 'convert') {
+          const next = Math.min(98, Math.max(lastPct, 92) + 0.4);
+          reportProgress(next, '', '파일 정리 중', 'convert');
+          return;
+        }
+        if (lastPct < 15) {
+          warmupPct = Math.min(15, warmupPct + 1.5);
+          reportProgress(warmupPct, '', '연결 중', 'download');
+        }
+      }, 1200);
+    }
+
+    function startPolling() {
+      pollTimer = setInterval(async () => {
+        try {
+          const content = await Neutralino.filesystem.readFile(log);
+          if (!content) return;
+          parseProgress(content, reportProgress);
+        } catch (e) { /* 로그 파일이 아직 없으면 무시 */ }
+      }, 800);
+    }
+
+    function stopPolling() {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (activityTimer) { clearInterval(activityTimer); activityTimer = null; }
+    }
+
+    try {
+      await Neutralino.filesystem.writeFile(scriptPath, scriptContent);
+      startPolling();
+      startActivityPulse();
+
+      if (signal && signal.aborted) throw new Error('CANCELLED');
+
+      const commandPromise = runCmdInBackground(`cmd /c "${scriptPath}"`, exitPath, signal);
+      commandPromise.catch(() => {});
+
+      let r = null;
+      if (signal) {
+        let abortHandler = null;
+        const abortPromise = new Promise((_, reject) => {
+          abortHandler = () => {
+            void cancelActiveDownload();
+            reject(new Error('CANCELLED'));
+          };
+          signal.addEventListener('abort', abortHandler, { once: true });
+        });
+
+        try {
+          r = await Promise.race([commandPromise, abortPromise]);
+        } finally {
+          if (abortHandler) signal.removeEventListener('abort', abortHandler);
+        }
+      } else {
+        r = await commandPromise;
+      }
+
+      stopPolling();
+
+      if (signal && signal.aborted) throw new Error('CANCELLED');
+
+      try { await Neutralino.filesystem.removeFile(scriptPath); } catch (e) { /* ignored */ }
+      try { await Neutralino.filesystem.removeFile(exitPath); } catch (e) { /* ignored */ }
+
+      let finalLog = '';
+      try { finalLog = await Neutralino.filesystem.readFile(log); } catch (e) { /* ignored */ }
+      parseProgress(finalLog, reportProgress);
+
+      if (r.exitCode !== 0) {
+        const errLine = finalLog.split('\n').reverse().find(l =>
+          l.trim() && /error/i.test(l) && !l.includes('[debug]')
+        );
+        throw new Error(errLine || `yt-dlp 오류 (종료 코드: ${r.exitCode})`);
+      }
+
+      reportProgress(100, '', '', 'convert');
+      const filePath = parseFinalFilePath(finalLog, savePath, videoExts) ||
+        await findLatestFile(savePath, startedAt - 5000, videoExts) ||
+        savePath;
+      return filePath === savePath ? filePath : await waitForFileReady(filePath);
+
+    } catch (e) {
+      stopPolling();
+      try { await Neutralino.filesystem.removeFile(scriptPath); } catch (_) { /* ignored */ }
+      try { await Neutralino.filesystem.removeFile(exitPath); } catch (_) { /* ignored */ }
+      throw e;
+    } finally {
+      activeDownloadPid = 0;
+    }
+  }
+
   function cleanPathText(value) {
     return String(value || '')
       .trim()
@@ -518,10 +699,9 @@ const YTDlp = (() => {
     return !!normalizedDir && normalizedFile.startsWith(`${normalizedDir}\\`);
   }
 
-  function parseFinalFilePath(log, savePath) {
+  function parseFinalFilePath(log, savePath, mediaExts = /\.(mp3|m4a|wav|flac|ogg|opus|aac)$/i) {
     if (!log) return '';
 
-    const audioExts = /\.(mp3|m4a|wav|flac|ogg|opus|aac)$/i;
     const candidates = [];
     const patterns = [
       /\[ExtractAudio\]\s+Destination:\s+(.+)$/i,
@@ -531,7 +711,9 @@ const YTDlp = (() => {
       /\[download\]\s+(.+?)\s+has already been downloaded/i,
       /\[download\]\s+Destination:\s+(.+)$/i,
       /\[Merger\]\s+Merging formats into\s+"(.+?)"/i,
-      /\[MoveFiles\]\s+Moving file\s+.+?\s+to\s+"(.+?)"/i
+      /\[MoveFiles\]\s+Moving file\s+.+?\s+to\s+"(.+?)"/i,
+      /\[VideoRemuxer\]\s+Remuxing video from\s+".+?"\s+to\s+"(.+?)"/i,
+      /\[VideoRemuxer\]\s+Not remuxing media file\s+"(.+?)"/i
     ];
 
     String(log).split(/\r?\n/).forEach((line, index) => {
@@ -555,7 +737,7 @@ const YTDlp = (() => {
       .filter(item => item.path && !/%\([^)]+\)s/.test(item.path))
       .map(item => ({
         path: item.path,
-        score: (audioExts.test(item.path) ? 10 : 0) +
+        score: (mediaExts.test(item.path) ? 10 : 0) +
           (isInsideDir(item.path, savePath) ? 5 : 0) +
           (item.index / 1000)
       }))
@@ -606,10 +788,9 @@ const YTDlp = (() => {
   // ────────────────────────────────────────────────────────────────
   //  저장 폴더에서 가장 최근 오디오 파일 찾기
   // ────────────────────────────────────────────────────────────────
-  async function findLatestFile(dir, minModifiedAt = 0) {
+  async function findLatestFile(dir, minModifiedAt = 0, mediaExts = /\.(mp3|m4a|wav|flac|ogg|opus|aac)$/i) {
     try {
       const entries = await Neutralino.filesystem.readDirectory(dir);
-      const audioExts = /\.(mp3|m4a|wav|flac|ogg|opus|aac)$/i;
       const fileTime = entry => {
         const raw = entry.modifiedAt || entry.createdAt || 0;
         const numeric = Number(raw);
@@ -617,7 +798,7 @@ const YTDlp = (() => {
         return Date.parse(raw) || 0;
       };
       const audioFiles = entries
-        .filter(e => e.type === 'FILE' && audioExts.test(e.entry))
+        .filter(e => e.type === 'FILE' && mediaExts.test(e.entry))
         .map(e => ({ entry: e.entry, time: fileTime(e) }))
         .sort((a, b) => b.time - a.time);
 
@@ -857,5 +1038,5 @@ const YTDlp = (() => {
     return `${m}:${s}`;
   }
 
-  return { checkDeps, getVideoInfo, download, updateYtdlp, installYtdlp, installFfmpeg, cancelActiveDownload, cleanupTempScripts };
+  return { checkDeps, getVideoInfo, download, downloadVideo, updateYtdlp, installYtdlp, installFfmpeg, cancelActiveDownload, cleanupTempScripts };
 })();

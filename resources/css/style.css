@@ -168,6 +168,33 @@ body {
 .tab.active { display: block; }
 
 /* ── URL Row ─────────────────────────────────────── */
+.convert-mode-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.convert-mode-btn {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 7px 14px;
+}
+.convert-mode-btn:hover {
+  color: var(--text);
+}
+.convert-mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
 .input-guide {
   display: block;
   color: var(--text);
@@ -1495,6 +1522,12 @@ input[type="checkbox"] {
   justify-content: space-between;
   gap: 14px;
 }
+.storage-local-only > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
 .storage-current {
   display: flex;
   align-items: center;
@@ -1991,6 +2024,13 @@ code {
     align-items: stretch;
     gap: 12px;
   }
+  .convert-mode-tabs {
+    display: flex;
+    width: 100%;
+  }
+  .convert-mode-btn {
+    flex: 1;
+  }
   .option-label {
     width: 100%;
   }
@@ -2002,6 +2042,13 @@ code {
     justify-content: center;
   }
   .queue-toolbar {
+    justify-content: stretch;
+  }
+  .storage-local-only {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .storage-local-only > div:last-child {
     justify-content: stretch;
   }
   .queue-item {

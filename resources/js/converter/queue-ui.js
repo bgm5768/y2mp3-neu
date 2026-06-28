@@ -14,11 +14,15 @@ export function createQueueUi({ Queue, appState }) {
     return btn;
   }
 
-  function statusLabel(status) {
+  function modeActionLabel(item) {
+    return item?.mode === 'video' ? '다운로드' : '변환';
+  }
+
+  function statusLabel(status, item) {
     return ({
       waiting: '대기 중',
       loading: '정보 불러오는 중',
-      running: '변환 중',
+      running: `${modeActionLabel(item)} 중`,
       done: '완료',
       error: '실패',
       cancelled: '취소됨'
@@ -68,7 +72,12 @@ export function createQueueUi({ Queue, appState }) {
 
       const meta = document.createElement('div');
       meta.className = 'queue-meta';
-      meta.textContent = [item.uploader, item.duration].filter(Boolean).join(' ? ');
+      meta.textContent = [
+        item.modeLabel,
+        item.sourceLabel,
+        item.uploader,
+        item.duration
+      ].filter(Boolean).join(' · ');
       meta.classList.toggle('hidden', !meta.textContent);
 
       const progress = document.createElement('div');
@@ -95,7 +104,7 @@ export function createQueueUi({ Queue, appState }) {
 
       const status = document.createElement('span');
       status.className = `queue-status ${item.status}`;
-      status.textContent = statusLabel(item.status);
+      status.textContent = statusLabel(item.status, item);
 
       const actions = document.createElement('div');
       actions.className = 'queue-item-actions';
@@ -144,15 +153,15 @@ export function createQueueUi({ Queue, appState }) {
       [
         ['waiting', '대기 중'],
         ['loading', '정보 불러오는 중'],
-        ['running', '변환 중'],
+        ['running', '진행 중'],
         ['done', '완료'],
         ['error', '실패'],
         ['cancelled', '취소됨']
       ].forEach(([key, label]) => {
-        if (counts[key]) parts.push(`${label} ${counts[key]}?`);
+        if (counts[key]) parts.push(`${label} ${counts[key]}개`);
       });
 
-      summary.textContent = parts.join(' ? ');
+      summary.textContent = parts.join(' · ');
     },
 
     updateToolbar() {

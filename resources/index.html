@@ -145,21 +145,30 @@
     <!-- ===== TAB: CONVERT ===== -->
     <section id="tab-convert" class="tab">
       <div class="page-header">
-        <h1>MP3 변환기</h1>
-        <p class="subtitle">URL 개수에 따라 단일 또는 다중 변환으로 자동 처리됩니다.</p>
+        <h1>변환</h1>
+        <p class="subtitle">MP3 변환은 YouTube, Instagram, TikTok을 지원하고 동영상 다운로드는 YouTube, TikTok을 지원합니다.</p>
       </div>
 
       <!-- URL 입력 카드 -->
       <div class="card conversion-card">
-        <label for="url-input" class="input-guide">
-          변환할 YouTube URL을 입력하세요. 여러 개는 줄바꿈으로 구분할 수 있습니다.
+        <div class="convert-mode-tabs" role="tablist" aria-label="변환 방식">
+          <button id="convert-mode-audio" class="convert-mode-btn active" type="button" data-convert-mode="audio" aria-pressed="true">
+            MP3 변환
+          </button>
+          <button id="convert-mode-video" class="convert-mode-btn" type="button" data-convert-mode="video" aria-pressed="false">
+            동영상 다운로드
+          </button>
+        </div>
+
+        <label id="url-input-label" for="url-input" class="input-guide">
+          변환할 YouTube, Instagram, TikTok URL을 입력하세요. 여러 개는 줄바꿈으로 구분할 수 있습니다.
         </label>
         <div class="url-row">
           <textarea
             id="url-input"
             class="url-input url-textarea"
             rows="3"
-            placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/...&#10;https://www.youtube.com/shorts/..."
+            placeholder="https://www.youtube.com/watch?v=...&#10;https://www.instagram.com/reel/...&#10;https://www.tiktok.com/@user/video/..."
             autocomplete="off"
             spellcheck="false"
           ></textarea>
@@ -170,7 +179,7 @@
 
         <div class="conversion-controls">
           <div class="convert-options">
-            <label class="option-label">
+            <label class="option-label audio-option">
               음질
               <select id="quality-select" class="select">
                 <option value="320">320 kbps (최고)</option>
@@ -181,7 +190,7 @@
               </select>
             </label>
 
-            <label class="option-label">
+            <label class="option-label audio-option">
               출력 형식
               <select id="format-select" class="select">
                 <option value="mp3" selected>MP3</option>
@@ -191,7 +200,26 @@
               </select>
             </label>
 
-            <label class="option-label convert-playlist-option">
+            <label class="option-label video-option hidden">
+              화질
+              <select id="video-quality-select" class="select">
+                <option value="best" selected>가능한 최고 화질</option>
+                <option value="1080">1080p 이하</option>
+                <option value="720">720p 이하</option>
+                <option value="480">480p 이하</option>
+              </select>
+            </label>
+
+            <label class="option-label video-option hidden">
+              파일 형식
+              <select id="video-format-select" class="select">
+                <option value="mp4" selected>MP4</option>
+                <option value="mkv">MKV</option>
+                <option value="webm">WEBM</option>
+              </select>
+            </label>
+
+            <label class="option-label audio-option convert-playlist-option">
               변환 후
               <select id="post-convert-playlist-select" class="select">
                 <option value="">플레이리스트에 추가 안 함</option>
@@ -219,7 +247,7 @@
       <div id="queue-panel" class="queue-panel hidden">
         <div class="queue-panel-header">
           <div>
-            <h2>변환 대기열</h2>
+            <h2>작업 대기열</h2>
             <p id="queue-summary" class="queue-summary">대기 중인 항목이 없습니다.</p>
           </div>
           <div class="queue-toolbar">
@@ -229,7 +257,7 @@
           </div>
         </div>
         <div id="queue-empty" class="queue-empty hidden">
-          변환할 URL을 입력하면 이곳에 진행 상태가 표시됩니다.
+          URL을 입력하면 이곳에 진행 상태가 표시됩니다.
         </div>
         <div id="queue-list" class="queue-list">
           <!-- Queue items injected by JS -->
@@ -246,27 +274,39 @@
       <!-- 저장 위치 -->
       <div class="card settings-card">
         <h2 class="settings-section-title">💾 저장 위치</h2>
-        <div class="settings-group storage-local-only">
-          <div class="storage-current">
-            <span class="radio-icon">🖥</span>
-            <span>
-              <strong>내 PC</strong>
-              <small id="local-path-display">경로 선택 안 됨</small>
-            </span>
+          <div class="settings-group storage-local-only">
+            <div class="storage-current">
+              <span class="radio-icon">🎵</span>
+              <span>
+                <strong>음악 저장 폴더</strong>
+                <small id="music-path-display">경로 선택 안 됨</small>
+              </span>
+            </div>
+            <div>
+              <button id="music-path-btn" class="btn btn-ghost btn-sm">📁 경로 선택…</button>
+              <button id="player-open-folder-btn" class="btn btn-ghost btn-sm">▣ 음악 폴더 열기</button>
+            </div>
           </div>
-          <div>
-              <button id="local-path-btn" class="btn btn-ghost btn-sm">📁 경로 선택…</button>
-              <button id="player-open-folder-btn" class="btn btn-ghost btn-sm">▣ 저장 폴더 열기</button>
+          <div class="settings-group storage-local-only">
+            <div class="storage-current">
+              <span class="radio-icon">🎬</span>
+              <span>
+                <strong>동영상 저장 폴더</strong>
+                <small id="video-path-display">경로 선택 안 됨</small>
+              </span>
+            </div>
+            <div>
+              <button id="video-path-btn" class="btn btn-ghost btn-sm">📁 경로 선택…</button>
+              <button id="video-open-folder-btn" class="btn btn-ghost btn-sm">▣ 동영상 폴더 열기</button>
+            </div>
           </div>
-
         </div>
-      </div>
 
       <!-- ffmpeg / yt-dlp -->
       <div class="card settings-card">
         <h2 class="settings-section-title">🔧 의존성 도구</h2>
         <p id="dependency-summary" class="settings-desc dep-summary">
-          ffmpeg와 yt-dlp는 YouTube 변환에 필요한 필수 의존성 도구입니다.
+          ffmpeg와 yt-dlp는 음악 변환과 동영상 다운로드에 필요한 필수 도구입니다.
         </p>
 
         <div class="dep-row">

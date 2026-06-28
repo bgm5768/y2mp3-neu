@@ -8,10 +8,24 @@ import { el } from '../core/dom.js';
 export function createSettingsUi({ Settings, Neutralino, YTDlp, Toast, DependencyUI, getPlayer }) {
   function initSettingsTab() {
     const folderBtns = [
-      { btn: 'local-path-btn', display: 'local-path-display', key: 'localPath', title: '저장 폴더 선택' }
+      {
+        btn: 'music-path-btn',
+        display: 'music-path-display',
+        key: 'musicPath',
+        title: '음악 저장 폴더 선택',
+        affectsPlayer: true
+      },
+      {
+        btn: 'video-path-btn',
+        display: 'video-path-display',
+        key: 'videoPath',
+        title: '동영상 저장 폴더 선택',
+        openBtn: 'video-open-folder-btn',
+        affectsPlayer: false
+      }
     ];
 
-    folderBtns.forEach(({ btn, display, key, title }) => {
+    folderBtns.forEach(({ btn, display, key, title, openBtn, affectsPlayer }) => {
       el(btn)?.addEventListener('click', async () => {
         try {
           const p = await Neutralino.os.showFolderDialog(title);
@@ -19,9 +33,22 @@ export function createSettingsUi({ Settings, Neutralino, YTDlp, Toast, Dependenc
             const displayEl = el(display);
             if (displayEl) displayEl.textContent = p;
             await Settings.save({ saveDest: 'local', [key]: p });
-            getPlayer()?.invalidate();
+            if (affectsPlayer) getPlayer()?.invalidate();
           }
         } catch {}
+      });
+
+      el(openBtn)?.addEventListener('click', async () => {
+        const path = Settings.getActiveSavePath(key === 'videoPath' ? 'video' : 'audio');
+        if (!path) {
+          Toast.show('먼저 저장 위치를 선택하세요.', 'warning');
+          return;
+        }
+        try {
+          await Neutralino.os.open(path);
+        } catch {
+          Toast.show('저장 폴더를 열 수 없습니다.', 'error');
+        }
       });
     });
 
@@ -71,37 +98,56 @@ export function createSettingsUi({ Settings, Neutralino, YTDlp, Toast, Dependenc
 
     el('save-settings-btn').addEventListener('click', async () => {
       const quality = el('quality-select')?.value || '192';
-      const format  = el('format-select')?.value || 'mp3';
+      const format = el('format-select')?.value || 'mp3';
+      const videoQuality = el('video-quality-select')?.value || 'best';
+      const videoFormat = el('video-format-select')?.value || 'mp4';
       const embedThumb = true;
       const embedMeta = true;
-      await Settings.save({ saveDest: 'local', quality, format, embedThumb, embedMeta });
+      await Settings.save({ saveDest: 'local', quality, format, videoQuality, videoFormat, embedThumb, embedMeta });
       getPlayer()?.invalidate();
       Toast.show('설정이 저장되었습니다.', 'success');
     });
   }
 
   function applySettingsToUI(s) {
-    const localPathDisplay = el('local-path-display');
-    if (localPathDisplay) localPathDisplay.textContent = s.localPath || '경로 선택 안 됨';
+    const musicPathDisplay = el('music-path-display');
+    const videoPathDisplay = el('video-path-display');
+    if (musicPathDisplay) musicPathDisplay.textContent = s.musicPath || s.localPath || '경로 선택 안 됨';
+    if (videoPathDisplay) videoPathDisplay.textContent = s.videoPath || '경로 선택 안 됨';
     if (s.quality) el('quality-select').value = s.quality;
     if (s.format) el('format-select').value = s.format;
+    if (s.videoQuality && el('video-quality-select')) el('video-quality-select').value = s.videoQuality;
+    if (s.videoFormat && el('video-format-select')) el('video-format-select').value = s.videoFormat;
   }
 
   async function ensureDefaultLocalPath(s) {
+    async function firstAvailablePath(names) {
+      for (const name of names) {
+        try {
+          const path = await Neutralino.os.getPath(name);
+          if (path) return path;
+        } catch {}
+      }
+      return '';
+    }
+
     if (s.saveDest !== 'local') {
       s = await Settings.save({ saveDest: 'local' });
     }
 
-    if (s.localPath) return s;
-
-    const preferredPaths = ['music', 'downloads', 'documents'];
-    for (const name of preferredPaths) {
-      try {
-        const path = await Neutralino.os.getPath(name);
-        if (path) return await Settings.save({ localPath: path });
-      } catch {}
+    const patch = {};
+    const musicPath = s.musicPath || s.localPath || '';
+    if (!musicPath) {
+      patch.musicPath = await firstAvailablePath(['music', 'downloads', 'documents']);
     }
-    return s;
+    if (!s.videoPath) {
+      patch.videoPath = await firstAvailablePath(['video', 'downloads', 'documents']) || patch.musicPath || musicPath;
+    }
+    if (!s.localPath && (patch.musicPath || musicPath)) {
+      patch.localPath = patch.musicPath || musicPath;
+    }
+
+    return Object.keys(patch).length ? Settings.save(patch) : s;
   }
 
   return { initSettingsTab, applySettingsToUI, ensureDefaultLocalPath };
