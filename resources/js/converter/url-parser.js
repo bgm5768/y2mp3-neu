@@ -40,7 +40,12 @@ function ensureProtocol(value) {
     /^((www|m|music)\.)?youtube\.com\//i.test(value) ||
     /^youtu\.be\//i.test(value) ||
     /^((www|m)\.)?instagram\.com\//i.test(value) ||
-    /^((www|m|vm|vt)\.)?tiktok\.com\//i.test(value);
+    /^((www|m|vm|vt)\.)?tiktok\.com\//i.test(value) ||
+    /^((www|m|v)\.)?douyin\.com\//i.test(value) ||
+    /^iesdouyin\.com\//i.test(value) ||
+    /^((www|m)\.)?xiaohongshu\.com\//i.test(value) ||
+    /^((www|m)\.)?xhslink\.com\//i.test(value) ||
+    /^((www|m)\.)?rednote\.com\//i.test(value);
 
   return supportedDomain ? `https://${value}` : '';
 }
@@ -57,6 +62,11 @@ function cleanTrackingParams(parsed) {
 function normalizedUrlText(parsed) {
   cleanTrackingParams(parsed);
   return parsed.toString();
+}
+
+function withSearchParams(url, parsed) {
+  const query = parsed.searchParams.toString();
+  return query ? `${url}?${query}` : url;
 }
 
 function normalizeYouTubeParsedUrl(parsed, rawValue) {
@@ -177,6 +187,89 @@ function normalizeTikTokParsedUrl(parsed, rawValue) {
   };
 }
 
+function normalizeDouyinParsedUrl(parsed, rawValue) {
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '');
+  const isDouyin =
+    host === 'douyin.com' ||
+    host.endsWith('.douyin.com') ||
+    host === 'iesdouyin.com';
+
+  if (!isDouyin) return null;
+
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  const videoIndex = parts.findIndex(part => part.toLowerCase() === 'video');
+  const queryVideoId =
+    parsed.searchParams.get('modal_id') ||
+    parsed.searchParams.get('aweme_id') ||
+    parsed.searchParams.get('item_id') ||
+    '';
+  const noteId = queryVideoId || (videoIndex >= 0 ? parts[videoIndex + 1] || '' : '');
+
+  if (noteId) {
+    return {
+      url: `https://www.douyin.com/video/${noteId}`,
+      key: `douyin:${noteId}`,
+      source: 'douyin',
+      sourceLabel: 'Douyin',
+      raw: rawValue
+    };
+  }
+
+  if (!parts.length) return null;
+
+  return {
+    url: normalizedUrlText(parsed),
+    key: `douyin:${host}:${parts.join('/')}`,
+    source: 'douyin',
+    sourceLabel: 'Douyin',
+    raw: rawValue
+  };
+}
+
+function normalizeXiaohongshuParsedUrl(parsed, rawValue) {
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '');
+  const isXiaohongshu =
+    host === 'xiaohongshu.com' ||
+    host.endsWith('.xiaohongshu.com') ||
+    host === 'xhslink.com' ||
+    host.endsWith('.xhslink.com') ||
+    host === 'rednote.com' ||
+    host.endsWith('.rednote.com');
+
+  if (!isXiaohongshu) return null;
+
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  const exploreIndex = parts.findIndex(part => part.toLowerCase() === 'explore');
+  const itemIndex = parts.findIndex(part => part.toLowerCase() === 'item');
+  const noteId = exploreIndex >= 0
+    ? (parts[exploreIndex + 1] || '')
+    : (itemIndex >= 0 ? (parts[itemIndex + 1] || '') : '');
+
+  if (noteId) {
+    const canonicalUrl = host === 'rednote.com' || host.endsWith('.rednote.com')
+      ? withSearchParams(`https://www.xiaohongshu.com/explore/${noteId}`, parsed)
+      : normalizedUrlText(parsed);
+
+    return {
+      url: canonicalUrl,
+      key: `xiaohongshu:${noteId}`,
+      source: 'xiaohongshu',
+      sourceLabel: 'Xiaohongshu/Rednote',
+      raw: rawValue
+    };
+  }
+
+  if (!parts.length) return null;
+
+  return {
+    url: normalizedUrlText(parsed),
+    key: `xiaohongshu:${host}:${parts.join('/')}`,
+    source: 'xiaohongshu',
+    sourceLabel: 'Xiaohongshu/Rednote',
+    raw: rawValue
+  };
+}
+
 export function normalizeMediaUrl(rawValue, options = {}) {
   let value = stripUrlToken(rawValue);
 
@@ -195,11 +288,13 @@ export function normalizeMediaUrl(rawValue, options = {}) {
     return null;
   }
 
-  const allowedSources = new Set(options.allowedSources || ['youtube', 'instagram', 'tiktok']);
+  const allowedSources = new Set(options.allowedSources || ['youtube', 'instagram', 'tiktok', 'douyin', 'xiaohongshu']);
   const normalized =
     normalizeYouTubeParsedUrl(parsed, rawValue) ||
     normalizeInstagramParsedUrl(parsed, rawValue) ||
-    normalizeTikTokParsedUrl(parsed, rawValue);
+    normalizeTikTokParsedUrl(parsed, rawValue) ||
+    normalizeDouyinParsedUrl(parsed, rawValue) ||
+    normalizeXiaohongshuParsedUrl(parsed, rawValue);
 
   return normalized && allowedSources.has(normalized.source) ? normalized : null;
 }

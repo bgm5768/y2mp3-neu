@@ -21,6 +21,7 @@ const YTDlp = (() => {
   }
 
   const _cache = { ytdlp: null, ffmpeg: null, deps: null, depsAt: 0 };
+  const autoCookieCache = {};
 
   // ────────────────────────────────────────────────────────────────
   //  안전한 execCommand 래퍼
@@ -37,7 +38,7 @@ const YTDlp = (() => {
       const killByPid = activeDownloadPid
         ? `taskkill /F /T /PID ${activeDownloadPid} >nul 2>&1`
         : '';
-      const killTools = 'taskkill /F /IM yt-dlp.exe /T >nul 2>&1 & taskkill /F /IM ffmpeg.exe /T >nul 2>&1';
+      const killTools = 'taskkill /F /IM yt-dlp.exe /T >nul 2>&1 & taskkill /F /IM ffmpeg.exe /T >nul 2>&1 & taskkill /F /IM curl.exe /T >nul 2>&1';
       const command = ['cmd /c "', killByPid, killByPid ? ' & ' : '', killTools, '"'].join('');
       await runCmd(command, true);
     } catch (e) { /* best effort */ }
@@ -166,6 +167,34 @@ const YTDlp = (() => {
     return found.path;
   }
 
+  function parseYtdlpVersionDate(version) {
+    const match = String(version || '').match(/(\d{4})\.(\d{2})\.(\d{2})/);
+    if (!match) return null;
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function isYtdlpOlderThan(version, maxAgeDays) {
+    const date = parseYtdlpVersionDate(version);
+    if (!date) return false;
+    return Date.now() - date.getTime() > maxAgeDays * 24 * 60 * 60 * 1000;
+  }
+
+  async function ensureFreshYtdlpForSource(source, onProgress) {
+    if (source !== 'douyin') return;
+
+    const deps = await checkDeps();
+    if (!deps.ytdlp.ok || !isYtdlpOlderThan(deps.ytdlp.version, 30)) return;
+
+    onProgress && onProgress(2, '', 'Douyin 지원 업데이트 확인 중', 'download');
+    await installYtdlp(progress => {
+      if (!progress || typeof progress !== 'object') return;
+      if (progress.message) {
+        onProgress && onProgress(Math.max(2, Math.min(8, Number(progress.pct) || 2)), '', progress.message, 'download');
+      }
+    });
+  }
+
   async function ffmpegExe() {
     if (_cache.ffmpeg) return _cache.ffmpeg;
     let found = await probeFfmpeg();
@@ -255,6 +284,14 @@ const YTDlp = (() => {
     }
 
     return filePath;
+  }
+
+  function quoteArg(value) {
+    return `"${String(value || '').replace(/"/g, '\\"')}"`;
+  }
+
+  function escapeCmdPercents(value) {
+    return String(value || '').replace(/%/g, '%%');
   }
 
   // ────────────────────────────────────────────────────────────────
@@ -521,8 +558,760 @@ const YTDlp = (() => {
     return `bv*${heightFilter}+ba/b${heightFilter}${fallback}`;
   }
 
+  function isProtectedChromiumCookieBrowser(cookieBrowser) {
+    const browser = String(cookieBrowser || '').toLowerCase();
+    return browser === 'chrome' || browser === 'edge';
+  }
+
+  const douyinCookieDomains = ['douyin.com', 'iesdouyin.com', 'amemv.com'];
+  const douyinUsefulCookieNames = new Set([
+    'ttwid',
+    'mstoken',
+    's_v_web_id',
+    'passport_csrf_token',
+    'odin_tt',
+    'sid_guard',
+    'sessionid',
+    'sid_tt',
+    'uid_tt'
+  ]);
+
+  function normalizeCookieDomain(domain) {
+    return String(domain || '')
+      .replace(/^#HttpOnly_/i, '')
+      .replace(/^\./, '')
+      .toLowerCase();
+  }
+
+  function parseCookieFileText(text) {
+    return String(text || '')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line && (!line.startsWith('#') || /^#HttpOnly_/i.test(line)))
+      .map(line => {
+        const fields = line.split('\t');
+        if (fields.length < 7) return null;
+        return {
+          domain: normalizeCookieDomain(fields[0]),
+          expiry: Number(fields[4]) || 0,
+          name: String(fields[5] || '').toLowerCase()
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function inspectCookieTextForSource(source, text) {
+    if (source !== 'douyin') return { ok: true, warning: '' };
+
+    const content = String(text || '').trim();
+    if (!content) {
+      return { ok: false, message: 'cookies.txt 파일이 비어 있습니다.' };
+    }
+    if (/^[\[{]/.test(content)) {
+      return { ok: false, message: 'cookies.txt가 Netscape 형식이 아닙니다. 브라우저 확장에서 "Netscape cookies.txt" 형식으로 다시 내보내세요.' };
+    }
+
+    const cookies = parseCookieFileText(content);
+    if (!cookies.length) {
+      return { ok: false, message: 'cookies.txt 형식을 읽을 수 없습니다. 탭으로 구분된 Netscape cookies.txt 파일을 선택해야 합니다.' };
+    }
+
+    const douyinCookies = cookies.filter(cookie =>
+      douyinCookieDomains.some(domain =>
+        cookie.domain === domain || cookie.domain.endsWith(`.${domain}`)
+      )
+    );
+    if (!douyinCookies.length) {
+      return { ok: false, message: 'cookies.txt 안에 Douyin 쿠키가 없습니다. Douyin 페이지에서 현재 사이트 쿠키를 다시 내보낸 파일을 선택하세요.' };
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const activeCookies = douyinCookies.filter(cookie =>
+      cookie.expiry === 0 || cookie.expiry > nowSeconds
+    );
+    if (!activeCookies.length) {
+      return { ok: false, message: 'cookies.txt 안의 Douyin 쿠키가 모두 만료되었습니다. Douyin을 브라우저에서 다시 연 뒤 cookies.txt를 새로 내보내세요.' };
+    }
+
+    const hasUsefulCookie = activeCookies.some(cookie =>
+      douyinUsefulCookieNames.has(cookie.name)
+    );
+
+    return {
+      ok: true,
+      warning: hasUsefulCookie
+        ? ''
+        : 'Douyin 도메인 쿠키는 있지만 세션 쿠키가 부족할 수 있습니다. 실패하면 Douyin을 새로 연 뒤 현재 사이트 쿠키를 다시 내보내세요.'
+    };
+  }
+
+  async function inspectCookieFileForSource(source, cookieFile) {
+    if (!cookieFile || source !== 'douyin') return { ok: true, warning: '' };
+
+    try {
+      const content = await Neutralino.filesystem.readFile(cookieFile);
+      return inspectCookieTextForSource(source, content);
+    } catch {
+      return { ok: false, message: 'cookies.txt 파일을 읽을 수 없습니다. 파일 경로와 권한을 확인하세요.' };
+    }
+  }
+
+  async function validateCookieFileForSource(source, cookieFile) {
+    const result = await inspectCookieFileForSource(source, cookieFile);
+    if (!result.ok) throw new Error(result.message || 'cookies.txt 파일을 확인할 수 없습니다.');
+    return result;
+  }
+
+  function defaultCookieUrlForSource(source) {
+    if (source === 'douyin') return 'https://www.douyin.com/';
+    return 'https://example.com/';
+  }
+
+  async function generatedCookieFilePath(source, browser) {
+    const safeSource = String(source || 'site').replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
+    const safeBrowser = String(browser || 'browser').replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
+    return `${await tempWorkDir()}\\${safeSource}_${safeBrowser}_cookies.txt`;
+  }
+
+  async function runYtdlpCookieExport({ source, browser, cookieFile, url }) {
+    const yd = await ytdlpExe();
+    const tempDir = await tempWorkDir();
+    const log = `${tempDir}\\_cookie_export_${Date.now()}.log`;
+    const scriptPath = `${tempDir}\\_run_cookie_export_${Date.now()}.cmd`;
+    const targetUrl = url || defaultCookieUrlForSource(source);
+    const ytdlpCmd = [
+      quoteArg(yd),
+      '--cookies',
+      quoteArg(cookieFile),
+      '--cookies-from-browser',
+      quoteArg(browser),
+      '--skip-download',
+      '--simulate',
+      '--no-playlist',
+      '--encoding utf-8',
+      quoteArg(targetUrl)
+    ].join(' ');
+
+    const scriptContent = [
+      '@echo off',
+      'chcp 65001 >nul',
+      'set PYTHONUTF8=1',
+      'set PYTHONIOENCODING=utf-8',
+      `${escapeCmdPercents(ytdlpCmd)} > ${quoteArg(log)} 2>&1`,
+      'exit /b %ERRORLEVEL%'
+    ].join('\r\n') + '\r\n';
+
+    try {
+      await Neutralino.filesystem.writeFile(scriptPath, scriptContent);
+      const result = await runCmd(`cmd /c "${scriptPath}"`, false);
+      let logText = '';
+      try { logText = await Neutralino.filesystem.readFile(log); } catch {}
+      return { ...result, logText };
+    } finally {
+      try { await Neutralino.filesystem.removeFile(scriptPath); } catch {}
+    }
+  }
+
+  function browserCookieExportErrorMessage(source, browser, text) {
+    const browserName = cookieBrowserLabel(browser);
+    const details = String(text || '');
+    if (isDpapiCookieError(details)) return chromiumDpapiCookieErrorMessage(browser);
+    if (isBrowserCookieCopyError(details)) return browserCookieCopyErrorMessage(browser);
+    if (/could not find|not found|no such file|profile/i.test(details)) {
+      return `${browserName} 쿠키를 찾을 수 없습니다. ${browserName}가 설치되어 있고 Douyin을 한 번 연 뒤 다시 시도하세요.`;
+    }
+    if (source === 'douyin') {
+      return `${browserName}에서 Douyin 쿠키를 자동으로 가져오지 못했습니다. ${browserName}에서 Douyin 페이지를 한 번 연 뒤 다시 시도하세요.`;
+    }
+    return `${browserName} 쿠키를 자동으로 가져오지 못했습니다.`;
+  }
+
+  function isAutoCookieFilePath(cookieFile) {
+    return /[\\/]douyin_firefox_cookies\.txt$/i.test(String(cookieFile || ''));
+  }
+
+  async function refreshCookieFileFromBrowser({ source = 'douyin', browser = 'firefox', url = '', force = false } = {}) {
+    const normalizedSource = String(source || '').toLowerCase();
+    const normalizedBrowser = String(browser || 'firefox').toLowerCase();
+    if (normalizedSource !== 'douyin') {
+      throw new Error('자동 쿠키 가져오기는 현재 Douyin에만 사용합니다.');
+    }
+    if (isProtectedChromiumCookieBrowser(normalizedBrowser)) {
+      throw new Error(chromiumDpapiCookieErrorMessage(normalizedBrowser));
+    }
+    if (!normalizedBrowser) {
+      throw new Error('자동 쿠키를 가져올 브라우저를 선택하세요.');
+    }
+
+    const cacheKey = `${normalizedSource}:${normalizedBrowser}`;
+    const cached = autoCookieCache[cacheKey];
+    if (!force && cached) {
+      const check = await inspectCookieFileForSource(normalizedSource, cached);
+      if (check.ok) return { cookieFile: cached, browser: normalizedBrowser, warning: check.warning || '', reused: true };
+    }
+
+    const cookieFile = await generatedCookieFilePath(normalizedSource, normalizedBrowser);
+    try { await Neutralino.filesystem.removeFile(cookieFile); } catch {}
+
+    let r = null;
+    let logText = '';
+    try {
+      r = await runYtdlpCookieExport({
+        source: normalizedSource,
+        browser: normalizedBrowser,
+        cookieFile,
+        url: url || defaultCookieUrlForSource(normalizedSource)
+      });
+    } catch (e) {
+      logText = e.message || String(e || '');
+    }
+
+    const check = await inspectCookieFileForSource(normalizedSource, cookieFile);
+    if (!check.ok) {
+      const detailText = logText || r?.logText || r?.stdErr || r?.stdOut || '';
+      const exportMessage = detailText
+        ? browserCookieExportErrorMessage(normalizedSource, normalizedBrowser, detailText)
+        : '';
+      const shouldPreferExportMessage = check.message && /읽을 수 없습니다|read/i.test(check.message);
+      throw new Error((shouldPreferExportMessage && exportMessage) || check.message || exportMessage || 'cookies.txt 파일을 자동으로 만들지 못했습니다.');
+    }
+
+    autoCookieCache[cacheKey] = cookieFile;
+    return { cookieFile, browser: normalizedBrowser, warning: check.warning || '', reused: false };
+  }
+
+  async function resolveCookieFileForSource({ source, cookieBrowser, cookieFile, url, onProgress }) {
+    if (source !== 'douyin') return cookieFile || '';
+
+    const browser = isProtectedChromiumCookieBrowser(cookieBrowser) ? 'firefox' : (cookieBrowser || 'firefox');
+    const shouldPreferFirefox = browser === 'firefox' && (!cookieFile || isAutoCookieFilePath(cookieFile));
+
+    if (shouldPreferFirefox) {
+      try {
+        onProgress && onProgress(4, '', 'Firefox 쿠키 최신화 중', 'download');
+        const result = await refreshCookieFileFromBrowser({ source, browser, url, force: true });
+        if (result.warning) {
+          onProgress && onProgress(5, '', result.warning, 'download');
+        }
+        return result.cookieFile;
+      } catch (e) {
+        if (!cookieFile) throw e;
+        onProgress && onProgress(4, '', 'Firefox 자동 쿠키 갱신 실패, 저장된 cookies.txt 확인 중', 'download');
+      }
+    }
+
+    if (cookieFile) {
+      const check = await inspectCookieFileForSource(source, cookieFile);
+      if (check.ok) return cookieFile;
+      onProgress && onProgress(4, '', `${check.message || 'cookies.txt를 사용할 수 없습니다.'} Firefox 쿠키로 자동 전환합니다.`, 'download');
+    }
+
+    onProgress && onProgress(4, '', `${cookieBrowserLabel(browser)} 쿠키 가져오는 중`, 'download');
+    const result = await refreshCookieFileFromBrowser({ source, browser, url, force: true });
+    if (result.warning) {
+      onProgress && onProgress(5, '', result.warning, 'download');
+    }
+    return result.cookieFile;
+  }
+
+  function douyinReferer({ source, rawUrl }) {
+    if (source !== 'douyin') return '';
+    const raw = String(rawUrl || '').trim();
+    if (/^https?:\/\/\S+/i.test(raw)) return raw;
+    return 'https://www.douyin.com/';
+  }
+
+  function douyinRequestArgs({ source, rawUrl }) {
+    if (source !== 'douyin') return [];
+    const referer = douyinReferer({ source, rawUrl });
+    return [
+      `--referer "${referer}"`,
+      '--user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"',
+      '--add-header "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8,ko;q=0.7"'
+    ];
+  }
+
+  function videoCookieArgs({ source, cookieBrowser, cookieFile }) {
+    if (source !== 'douyin') return [];
+
+    const args = [];
+    if (cookieFile) {
+      args.push(`--cookies "${cookieFile}"`);
+    } else if (isProtectedChromiumCookieBrowser(cookieBrowser)) {
+      throw new Error(chromiumDpapiCookieErrorMessage(cookieBrowser));
+    } else if (cookieBrowser) {
+      args.push(`--cookies-from-browser "${cookieBrowser}"`);
+    }
+    return args;
+  }
+
+  function isDouyinCookieError(source, text) {
+    return source === 'douyin' && /fresh cookies|cookies?.*needed|login/i.test(String(text || ''));
+  }
+
+  function isDouyinEmptyWebDetailError(source, text) {
+    const details = String(text || '');
+    return source === 'douyin' &&
+      /web detail JSON/i.test(details) &&
+      /Failed to parse JSON|Expecting value/i.test(details) &&
+      /Fresh cookies/i.test(details);
+  }
+
+  function isBrowserCookieCopyError(text) {
+    return /could not copy .*cookie database|permission denied.*(?:cookie|cookies)|cookie database.*(?:locked|copy)/i.test(String(text || ''));
+  }
+
+  function isDpapiCookieError(text) {
+    return /failed to decrypt with dpapi|app-?bound|nonetype.*decode|github\.com\/yt-dlp\/yt-dlp\/issues\/10927/i.test(String(text || ''));
+  }
+
+  function cookieBrowserLabel(cookieBrowser) {
+    const browser = String(cookieBrowser || '').toLowerCase();
+    if (browser === 'chrome') return 'Chrome';
+    if (browser === 'edge') return 'Edge';
+    if (browser === 'firefox') return 'Firefox';
+    return '선택한 브라우저';
+  }
+
+  function browserCookieCopyErrorMessage(cookieBrowser) {
+    const browser = cookieBrowserLabel(cookieBrowser);
+    return `${browser} 쿠키 데이터베이스가 잠겨 있습니다. 설정 > 사이트 쿠키에서 브라우저 프로세스 정리를 누른 뒤 다시 시도하거나, cookies.txt를 지정해 주세요.`;
+  }
+
+  function chromiumDpapiCookieErrorMessage(cookieBrowser) {
+    const browser = cookieBrowserLabel(cookieBrowser);
+    return `${browser} 쿠키는 Windows DPAPI/App-Bound 보호 때문에 yt-dlp가 복호화할 수 없습니다. 설정 > 사이트 쿠키에서 Firefox를 선택하고 Firefox에서 Douyin에 한 번 접속한 뒤 다시 시도하거나, cookies.txt를 지정해 주세요.`;
+  }
+
+  function douyinCookieErrorMessage() {
+    return 'Douyin이 받은 쿠키를 최신 세션으로 인정하지 않았습니다. cookies.txt를 쓰는 중이면 Douyin 페이지를 새로 열고 현재 사이트 쿠키를 다시 내보낸 파일로 교체하세요. 브라우저 쿠키를 쓰는 중이면 Firefox에서 Douyin을 한 번 연 뒤 다시 시도하세요.';
+  }
+
+  async function douyinDownloadErrorMessage({ source, errorText, cookieFile }) {
+    if (!isDouyinEmptyWebDetailError(source, errorText)) {
+      return douyinCookieErrorMessage();
+    }
+
+    const cookieCheck = cookieFile
+      ? await inspectCookieFileForSource('douyin', cookieFile)
+      : { ok: false };
+
+    if (!cookieCheck.ok) {
+      return douyinCookieErrorMessage();
+    }
+
+    return 'Firefox 쿠키는 정상적으로 가져왔지만 Douyin 웹 상세 API가 빈 응답을 반환했습니다. 현재 yt-dlp의 Douyin 추출기가 필요한 서명/검증 쿠키를 자동 생성하지 못해 이 URL은 바로 다운로드할 수 없습니다. 앱과 yt-dlp를 최신 버전으로 업데이트한 뒤 다시 시도해 주세요.';
+  }
+
+  const douyinWebUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
+
+  function douyinAwemeIdFromUrl(url) {
+    const text = String(url || '');
+    const queryId = text.match(/[?&](?:modal_id|aweme_id|item_id)=(\d{10,})/i)?.[1];
+    if (queryId) return queryId;
+    return text.match(/\/video\/(\d{10,})/i)?.[1] || '';
+  }
+
+  function readCookieValue(cookieValues, name) {
+    return cookieValues[String(name || '').toLowerCase()] || '';
+  }
+
+  async function readCookieValuesForSource(source, cookieFile) {
+    const values = {};
+    if (!cookieFile || source !== 'douyin') return values;
+
+    const content = await Neutralino.filesystem.readFile(cookieFile);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    String(content || '').split(/\r?\n/).forEach(line => {
+      if (!line || (!/^#HttpOnly_/i.test(line) && line.startsWith('#'))) return;
+      const fields = line.trim().split('\t');
+      if (fields.length < 7) return;
+      const domain = normalizeCookieDomain(fields[0]);
+      const isDouyin = douyinCookieDomains.some(item =>
+        domain === item || domain.endsWith(`.${item}`)
+      );
+      if (!isDouyin) return;
+      const expiry = Number(fields[4]) || 0;
+      if (expiry && expiry <= nowSeconds) return;
+      values[String(fields[5] || '').toLowerCase()] = String(fields[6] || '');
+    });
+    return values;
+  }
+
+  function randomDouyinToken(length = 120) {
+    const chars = 'ABCDEFGHIGKLMNOPQRSTUVWXYZabcdefghigklmnopqrstuvwxyz0123456789=';
+    let value = '';
+    for (let i = 0; i < length; i += 1) {
+      value += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return value;
+  }
+
+  function encodeDouyinQuery(params) {
+    return Object.entries(params)
+      .filter(([, value]) => value !== undefined && value !== null && value !== '')
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+      .join('&');
+  }
+
+  function buildDouyinDetailUrl(awemeId, cookieValues) {
+    const svWebId = readCookieValue(cookieValues, 's_v_web_id');
+    const params = {
+      aweme_id: awemeId,
+      device_platform: 'webapp',
+      aid: '6383',
+      channel: 'channel_pc_web',
+      update_version_code: '170400',
+      pc_client_type: '1',
+      version_code: '190500',
+      version_name: '19.5.0',
+      cookie_enabled: 'true',
+      screen_width: readCookieValue(cookieValues, 'dy_swidth') || '1920',
+      screen_height: readCookieValue(cookieValues, 'dy_sheight') || '1080',
+      browser_language: 'zh-CN',
+      browser_platform: 'Win32',
+      browser_name: 'Firefox',
+      browser_version: '140.0',
+      browser_online: 'true',
+      engine_name: 'Gecko',
+      engine_version: '140.0',
+      os_name: 'Windows',
+      os_version: '10',
+      cpu_core_num: readCookieValue(cookieValues, 'device_web_cpu_core') || '8',
+      device_memory: readCookieValue(cookieValues, 'device_web_memory_size') || '8',
+      platform: 'PC',
+      downlink: '10',
+      effective_type: '4g',
+      round_trip_time: '50',
+      verifyFp: svWebId,
+      fp: svWebId,
+      msToken: readCookieValue(cookieValues, 'mstoken') || randomDouyinToken()
+    };
+    return `https://www.douyin.com/aweme/v1/web/aweme/detail/?${encodeDouyinQuery(params)}&a_bogus=`;
+  }
+
+  async function runCurlToFile({ url, outputFile, cookieFile = '', referer = '', headers = [], timeoutSeconds = 60, signal }) {
+    const tempDir = await tempWorkDir();
+    const stamp = Date.now();
+    const log = `${tempDir}\\_curl_${stamp}.log`;
+    const exitPath = `${tempDir}\\_curl_exit_${stamp}.txt`;
+    const scriptPath = `${tempDir}\\_run_curl_${stamp}.cmd`;
+    const headerArgs = headers.map(header => `-H ${quoteArg(header)}`);
+    const args = [
+      'curl.exe',
+      '-L',
+      '--fail',
+      '--silent',
+      '--show-error',
+      '--connect-timeout 20',
+      `--max-time ${Math.max(10, Number(timeoutSeconds) || 60)}`,
+      cookieFile ? `-b ${quoteArg(cookieFile)}` : '',
+      `-A ${quoteArg(douyinWebUserAgent)}`,
+      referer ? `-e ${quoteArg(referer)}` : '',
+      ...headerArgs,
+      '-o',
+      quoteArg(outputFile),
+      quoteArg(url)
+    ].filter(Boolean).join(' ');
+    const scriptContent = [
+      '@echo off',
+      'chcp 65001 >nul',
+      `${escapeCmdPercents(args)} > ${quoteArg(log)} 2>&1`,
+      'set "_YTMP3_EXIT=%ERRORLEVEL%"',
+      `> ${quoteArg(exitPath)} echo %_YTMP3_EXIT%`,
+      'exit /b %_YTMP3_EXIT%'
+    ].join('\r\n') + '\r\n';
+
+    try {
+      await Neutralino.filesystem.writeFile(scriptPath, scriptContent);
+      const result = await runCmdInBackground(`cmd /c "${scriptPath}"`, exitPath, signal);
+      const logText = await Neutralino.filesystem.readFile(log).catch(() => '');
+      if (result.exitCode !== 0) {
+        throw new Error(logText.trim() || `curl 오류 (종료 코드: ${result.exitCode})`);
+      }
+      return outputFile;
+    } finally {
+      try { await Neutralino.filesystem.removeFile(scriptPath); } catch {}
+      try { await Neutralino.filesystem.removeFile(exitPath); } catch {}
+    }
+  }
+
+  async function fetchDouyinAwemeDetail({ awemeId, cookieFile, rawUrl, signal }) {
+    const cookieValues = await readCookieValuesForSource('douyin', cookieFile);
+    const detailUrl = buildDouyinDetailUrl(awemeId, cookieValues);
+    const tempDir = await tempWorkDir();
+    const detailFile = `${tempDir}\\douyin_detail_${awemeId}_${Date.now()}.json`;
+    try {
+      await runCurlToFile({
+        url: detailUrl,
+        outputFile: detailFile,
+        cookieFile,
+        referer: rawUrl || `https://www.douyin.com/video/${awemeId}`,
+        headers: [
+          'Accept: application/json, text/plain, */*',
+          'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8',
+          'sec-fetch-site: same-origin',
+          'sec-fetch-mode: cors',
+          'sec-fetch-dest: empty'
+        ],
+        timeoutSeconds: 45,
+        signal
+      });
+      const text = await Neutralino.filesystem.readFile(detailFile);
+      if (!String(text || '').trim()) {
+        throw new Error('Douyin 상세 API가 빈 응답을 반환했습니다.');
+      }
+      const data = JSON.parse(text);
+      const detail = data?.aweme_detail;
+      if (!detail?.video) {
+        throw new Error('Douyin 영상 정보를 찾지 못했습니다.');
+      }
+      return detail;
+    } finally {
+      try { await Neutralino.filesystem.removeFile(detailFile); } catch {}
+    }
+  }
+
+  function firstUrlFromAddr(addr) {
+    const list = addr?.url_list || addr?.urlList || [];
+    if (Array.isArray(list)) return list.find(item => /^https?:\/\//i.test(String(item || ''))) || '';
+    return '';
+  }
+
+  function pushDouyinFormat(formats, addr, meta = {}) {
+    const url = firstUrlFromAddr(addr);
+    if (!url) return;
+    formats.push({
+      url,
+      width: Number(addr?.width || meta.width || 0),
+      height: Number(addr?.height || meta.height || 0),
+      bitrate: Number(addr?.bit_rate || addr?.bitrate || meta.bitrate || 0),
+      size: Number(addr?.data_size || addr?.size || meta.size || 0),
+      id: meta.id || addr?.uri || addr?.url_key || 'video'
+    });
+  }
+
+  function collectDouyinFormats(detail) {
+    const video = detail?.video || {};
+    const formats = [];
+    (video.bit_rate || []).forEach((item, index) => {
+      pushDouyinFormat(formats, item?.play_addr, {
+        id: item?.gear_name || item?.quality_type || `bitrate-${index + 1}`,
+        bitrate: item?.bit_rate,
+        size: item?.play_addr?.data_size
+      });
+    });
+    pushDouyinFormat(formats, video.play_addr_h264, { id: 'play_addr_h264' });
+    pushDouyinFormat(formats, video.play_addr_265, { id: 'play_addr_265' });
+    pushDouyinFormat(formats, video.play_addr, {
+      id: 'play_addr',
+      width: video.width,
+      height: video.height
+    });
+    pushDouyinFormat(formats, video.download_addr, {
+      id: 'download_addr',
+      width: video.width,
+      height: video.height
+    });
+
+    const seen = new Set();
+    return formats.filter(format => {
+      if (!format.url || seen.has(format.url)) return false;
+      seen.add(format.url);
+      return true;
+    });
+  }
+
+  function selectDouyinFormat(formats, quality) {
+    const maxHeight = ['1080', '720', '480'].includes(String(quality)) ? Number(quality) : 0;
+    const candidates = maxHeight
+      ? formats.filter(format => !format.height || format.height <= maxHeight)
+      : formats;
+    return (candidates.length ? candidates : formats)
+      .slice()
+      .sort((a, b) =>
+        (Number(b.height) || 0) - (Number(a.height) || 0) ||
+        (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0) ||
+        (Number(b.size) || 0) - (Number(a.size) || 0)
+      )[0] || null;
+  }
+
+  function sanitizeFileName(value, fallback = 'douyin-video') {
+    const cleaned = String(value || '')
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[. ]+$/g, '')
+      .slice(0, 140);
+    const name = cleaned || fallback;
+    return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name) ? `${name}_` : name;
+  }
+
+  async function filePathExists(filePath) {
+    try {
+      await Neutralino.filesystem.getStats(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function uniqueOutputFile(dir, title, ext) {
+    const baseDir = String(dir || '').replace(/[\\/]+$/, '');
+    const safeTitle = sanitizeFileName(title);
+    const safeExt = String(ext || 'mp4').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'mp4';
+    let candidate = `${baseDir}\\${safeTitle}.${safeExt}`;
+    for (let index = 1; await filePathExists(candidate); index += 1) {
+      candidate = `${baseDir}\\${safeTitle} (${index}).${safeExt}`;
+    }
+    return candidate;
+  }
+
+  async function pollDownloadProgress(filePath, totalBytes, onProgress, shouldStop) {
+    let lastSize = -1;
+    while (!shouldStop()) {
+      try {
+        const stats = await Neutralino.filesystem.getStats(filePath);
+        const size = Number(stats?.size || stats?.length || 0);
+        if (size !== lastSize) {
+          lastSize = size;
+          const pct = totalBytes > 0
+            ? 12 + (Math.min(size, totalBytes) / totalBytes) * 78
+            : Math.min(90, 12 + Math.log10(Math.max(1, size)) * 10);
+          onProgress && onProgress(pct, '', totalBytes > 0
+            ? `${mb(size)} MB / ${mb(totalBytes)} MB`
+            : `${mb(size)} MB`, 'download');
+        }
+      } catch {}
+      await sleep(500);
+    }
+  }
+
+  async function downloadDouyinMediaUrl({ url, dest, cookieFile, rawUrl, totalBytes, signal, onProgress }) {
+    let done = false;
+    const poller = pollDownloadProgress(dest, totalBytes, onProgress, () => done).catch(() => {});
+    try {
+      await runCurlToFile({
+        url,
+        outputFile: dest,
+        cookieFile,
+        referer: rawUrl || 'https://www.douyin.com/',
+        headers: [
+          'Accept: */*',
+          'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8'
+        ],
+        timeoutSeconds: 60 * 60,
+        signal
+      });
+    } finally {
+      done = true;
+      await poller;
+    }
+    return waitForFileReady(dest);
+  }
+
+  async function remuxDouyinVideo({ inputFile, outputFile, outputFormat, signal, onProgress }) {
+    const ff = await ffmpegExe();
+    const tempDir = await tempWorkDir();
+    const stamp = Date.now();
+    const log = `${tempDir}\\_douyin_ffmpeg_${stamp}.log`;
+    const exitPath = `${tempDir}\\_douyin_ffmpeg_exit_${stamp}.txt`;
+    const scriptPath = `${tempDir}\\_run_douyin_ffmpeg_${stamp}.cmd`;
+    const codecArgs = outputFormat === 'webm'
+      ? '-c:v libvpx-vp9 -b:v 0 -crf 32 -c:a libopus'
+      : '-c copy';
+    const command = `${quoteArg(ff)} -y -i ${quoteArg(inputFile)} ${codecArgs} ${quoteArg(outputFile)}`;
+    const scriptContent = [
+      '@echo off',
+      'chcp 65001 >nul',
+      `${escapeCmdPercents(command)} > ${quoteArg(log)} 2>&1`,
+      'set "_YTMP3_EXIT=%ERRORLEVEL%"',
+      `> ${quoteArg(exitPath)} echo %_YTMP3_EXIT%`,
+      'exit /b %_YTMP3_EXIT%'
+    ].join('\r\n') + '\r\n';
+
+    try {
+      onProgress && onProgress(94, '', '파일 정리 중', 'convert');
+      await Neutralino.filesystem.writeFile(scriptPath, scriptContent);
+      const result = await runCmdInBackground(`cmd /c "${scriptPath}"`, exitPath, signal);
+      const logText = await Neutralino.filesystem.readFile(log).catch(() => '');
+      if (result.exitCode !== 0) {
+        throw new Error(logText.split('\n').reverse().find(line => line.trim()) || `ffmpeg 오류 (종료 코드: ${result.exitCode})`);
+      }
+      return waitForFileReady(outputFile);
+    } finally {
+      try { await Neutralino.filesystem.removeFile(scriptPath); } catch {}
+      try { await Neutralino.filesystem.removeFile(exitPath); } catch {}
+    }
+  }
+
+  async function downloadDouyinVideoDirect({ url, videoQuality, format, savePath,
+                                            cookieBrowser, cookieFile, rawUrl,
+                                            onProgress, signal }) {
+    const normalizedUrl = String(url || '').trim();
+    const awemeId = douyinAwemeIdFromUrl(rawUrl) || douyinAwemeIdFromUrl(normalizedUrl);
+    if (!awemeId) throw new Error('Douyin 영상 ID를 찾지 못했습니다.');
+
+    const resolvedCookieFile = await resolveCookieFileForSource({
+      source: 'douyin',
+      cookieBrowser,
+      cookieFile,
+      url: rawUrl || normalizedUrl,
+      onProgress
+    });
+
+    onProgress && onProgress(7, '', 'Douyin 영상 정보 가져오는 중', 'download');
+    const detail = await fetchDouyinAwemeDetail({
+      awemeId,
+      cookieFile: resolvedCookieFile,
+      rawUrl: rawUrl || normalizedUrl,
+      signal
+    });
+    const formatInfo = selectDouyinFormat(collectDouyinFormats(detail), videoQuality);
+    if (!formatInfo) throw new Error('Douyin 다운로드 URL을 찾지 못했습니다.');
+
+    const outputFormat = ['mp4', 'mkv', 'webm'].includes(String(format || '').toLowerCase())
+      ? String(format).toLowerCase()
+      : 'mp4';
+    const title = detail.desc || detail.caption || awemeId;
+    const finalFile = await uniqueOutputFile(savePath, title, outputFormat);
+    const downloadFile = outputFormat === 'mp4'
+      ? finalFile
+      : await uniqueOutputFile(savePath, `${title} 원본`, 'mp4');
+
+    onProgress && onProgress(10, '', 'Douyin CDN 다운로드 중', 'download');
+    await downloadDouyinMediaUrl({
+      url: formatInfo.url,
+      dest: downloadFile,
+      cookieFile: resolvedCookieFile,
+      rawUrl: rawUrl || normalizedUrl,
+      totalBytes: formatInfo.size,
+      signal,
+      onProgress
+    });
+
+    if (outputFormat !== 'mp4') {
+      try {
+        await remuxDouyinVideo({
+          inputFile: downloadFile,
+          outputFile: finalFile,
+          outputFormat,
+          signal,
+          onProgress
+        });
+        try { await Neutralino.filesystem.removeFile(downloadFile); } catch {}
+      } catch (e) {
+        return downloadFile;
+      }
+    }
+
+    onProgress && onProgress(100, '', '', 'convert');
+    return finalFile;
+  }
+
   async function downloadVideo({ url, videoQuality, format, savePath,
-                                proxy, rateLimit, onProgress, signal }) {
+                                source, cookieBrowser, cookieFile,
+                                rawUrl, proxy, rateLimit, onProgress, signal }) {
 
     const normalizedUrl = String(url || '').trim();
     if (!/^https?:\/\/\S+/i.test(normalizedUrl)) {
@@ -532,6 +1321,21 @@ const YTDlp = (() => {
     const outputFormat = ['mp4', 'mkv', 'webm'].includes(String(format || '').toLowerCase())
       ? String(format).toLowerCase()
       : 'mp4';
+    if (source === 'douyin') {
+      return downloadDouyinVideoDirect({
+        url: normalizedUrl,
+        videoQuality,
+        format: outputFormat,
+        savePath,
+        cookieBrowser,
+        cookieFile,
+        rawUrl,
+        onProgress,
+        signal
+      });
+    }
+
+    await ensureFreshYtdlpForSource(source, onProgress);
     const yd = await ytdlpExe();
     const ff = await ffmpegExe();
     const tempDir = await tempWorkDir();
@@ -545,6 +1349,14 @@ const YTDlp = (() => {
 
     onProgress && onProgress(3, '', '준비 중', 'download');
 
+    const resolvedCookieFile = await resolveCookieFileForSource({
+      source,
+      cookieBrowser,
+      cookieFile,
+      url: rawUrl || normalizedUrl,
+      onProgress
+    });
+
     const outTemplate = savePath.replace(/\\/g, '/') + '/%(title)s.%(ext)s';
     const args = [
       `-f "${videoFormatSelector(videoQuality, outputFormat)}"`,
@@ -557,6 +1369,9 @@ const YTDlp = (() => {
       `--encoding utf-8`,
       `--add-metadata`
     ];
+
+    args.push(...videoCookieArgs({ source, cookieBrowser, cookieFile: resolvedCookieFile }));
+    args.push(...douyinRequestArgs({ source, rawUrl }));
 
     if (proxy) args.push(`--proxy "${proxy}"`);
     if (rateLimit) args.push(`-r ${rateLimit}`);
@@ -667,6 +1482,20 @@ const YTDlp = (() => {
         const errLine = finalLog.split('\n').reverse().find(l =>
           l.trim() && /error/i.test(l) && !l.includes('[debug]')
         );
+        const errorText = errLine || finalLog;
+        if (isDpapiCookieError(errorText)) {
+          throw new Error(chromiumDpapiCookieErrorMessage(cookieBrowser));
+        }
+        if (isBrowserCookieCopyError(errorText)) {
+          throw new Error(browserCookieCopyErrorMessage(cookieBrowser));
+        }
+        if (isDouyinCookieError(source, errorText)) {
+          throw new Error(await douyinDownloadErrorMessage({
+            source,
+            errorText,
+            cookieFile: resolvedCookieFile
+          }));
+        }
         throw new Error(errLine || `yt-dlp 오류 (종료 코드: ${r.exitCode})`);
       }
 
@@ -1038,5 +1867,5 @@ const YTDlp = (() => {
     return `${m}:${s}`;
   }
 
-  return { checkDeps, getVideoInfo, download, downloadVideo, updateYtdlp, installYtdlp, installFfmpeg, cancelActiveDownload, cleanupTempScripts };
+  return { checkDeps, getVideoInfo, download, downloadVideo, inspectCookieFileForSource, refreshCookieFileFromBrowser, updateYtdlp, installYtdlp, installFfmpeg, cancelActiveDownload, cleanupTempScripts };
 })();

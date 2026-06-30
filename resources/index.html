@@ -146,7 +146,7 @@
     <section id="tab-convert" class="tab">
       <div class="page-header">
         <h1>변환</h1>
-        <p class="subtitle">MP3 변환은 YouTube, Instagram, TikTok을 지원하고 동영상 다운로드는 YouTube, TikTok을 지원합니다.</p>
+        <p class="subtitle">MP3 변환은 YouTube, Instagram, TikTok을 지원하고 동영상 다운로드는 YouTube, TikTok, Douyin, Xiaohongshu/Rednote를 지원합니다.</p>
       </div>
 
       <!-- URL 입력 카드 -->
@@ -337,6 +337,39 @@
             </div>
           </div>
           <button id="update-ytdlp-btn" class="btn btn-secondary btn-sm">⬇ 업데이트</button>
+        </div>
+      </div>
+
+      <div class="card settings-card">
+        <h2 class="settings-section-title">🍪 사이트 쿠키</h2>
+        <p class="settings-desc">
+          Douyin처럼 쿠키를 요구하는 사이트를 다운로드할 때 사용합니다. Chrome/Edge는 Windows DPAPI 보호 때문에 실패할 수 있으니 Firefox 또는 Douyin 현재 사이트 cookies.txt를 권장합니다.
+        </p>
+        <div class="settings-group cookie-file-row">
+          <label class="option-label">
+            브라우저 쿠키
+            <select id="cookie-browser-select" class="select">
+              <option value="firefox">Firefox (권장)</option>
+              <option value="chrome">Chrome (비권장)</option>
+              <option value="edge">Edge (비권장)</option>
+              <option value="">사용 안 함</option>
+            </select>
+          </label>
+          <button id="cookie-browser-cleanup-btn" class="btn btn-ghost btn-sm">브라우저 프로세스 정리</button>
+        </div>
+        <div class="settings-group storage-local-only">
+          <div class="storage-current">
+            <span class="radio-icon">▣</span>
+            <span>
+              <strong>cookies.txt</strong>
+              <small id="cookie-file-display">선택 안 됨</small>
+            </span>
+          </div>
+          <div>
+            <button id="cookie-auto-refresh-btn" class="btn btn-secondary btn-sm">Firefox 쿠키 자동 가져오기</button>
+            <button id="cookie-file-btn" class="btn btn-ghost btn-sm">파일 선택…</button>
+            <button id="cookie-file-clear-btn" class="btn btn-ghost btn-sm">선택 해제</button>
+          </div>
         </div>
       </div>
 

@@ -14,6 +14,7 @@ const Queue = (() => {
     return {
       id: ++idCounter,
       url,
+      rawUrl: input.rawUrl || input.raw || url,
       urlKey: input.urlKey || url,
       mode: input.mode || 'audio',
       modeLabel: input.modeLabel || 'MP3',

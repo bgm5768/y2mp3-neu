@@ -31,12 +31,12 @@ export function createConverter({
     video: {
       label: '동영상',
       actionLabel: '다운로드',
-      allowedSources: ['youtube', 'tiktok'],
+      allowedSources: ['youtube', 'tiktok', 'douyin', 'xiaohongshu'],
       readyButton: '동영상 다운로드',
       multiButton: count => `${count}개 동영상 다운로드 시작`,
       runningButton: '동영상 다운로드 중…',
-      inputGuide: '다운로드할 YouTube, TikTok 동영상 URL을 입력하세요. 여러 개는 줄바꿈으로 구분할 수 있습니다.',
-      placeholder: 'https://www.youtube.com/watch?v=...\nhttps://www.tiktok.com/@user/video/...'
+      inputGuide: '다운로드할 YouTube, TikTok, Douyin, Xiaohongshu/Rednote 동영상 URL을 입력하세요. 여러 개는 줄바꿈으로 구분할 수 있습니다.',
+      placeholder: 'https://www.youtube.com/watch?v=...\nhttps://www.tiktok.com/@user/video/...\nhttps://www.douyin.com/video/...\nhttps://www.xiaohongshu.com/explore/...'
     }
   };
 
@@ -47,7 +47,9 @@ export function createConverter({
   }
 
   function supportedSourceText(mode) {
-    return mode === 'video' ? 'YouTube, TikTok' : 'YouTube, Instagram, TikTok';
+    return mode === 'video'
+      ? 'YouTube, TikTok, Douyin, Xiaohongshu/Rednote'
+      : 'YouTube, Instagram, TikTok';
   }
 
   function analyzeUrlInput() {
@@ -204,7 +206,9 @@ export function createConverter({
       embedMeta: true,
       savePath: Settings.getActiveSavePath(mode),
       proxy: settings.useProxy ? settings.proxy : '',
-      rateLimit: settings.useRateLimit ? `${settings.rateLimitVal}${settings.rateLimitUnit}` : ''
+      rateLimit: settings.useRateLimit ? `${settings.rateLimitVal}${settings.rateLimitUnit}` : '',
+      cookieBrowser: document.getElementById('cookie-browser-select')?.value ?? settings.cookieBrowser ?? '',
+      cookieFile: settings.cookieFile || ''
     };
   }
 
@@ -243,12 +247,13 @@ export function createConverter({
     const options = getConversionOptions(mode);
     const added = Queue.add(analysis.valid.map(item => ({
       url: item.url,
+      rawUrl: item.raw || item.url,
       urlKey: item.queueKey,
       mode,
       modeLabel: modeConfig.label,
       source: item.source,
       sourceLabel: item.sourceLabel,
-      options: { ...options }
+      options: { ...options, source: item.source, rawUrl: item.raw || item.url }
     })));
 
     QueueUI.render();
@@ -322,6 +327,10 @@ export function createConverter({
           videoQuality: options.videoQuality,
           format: options.videoFormat,
           savePath: options.savePath,
+          source: options.source,
+          rawUrl: options.rawUrl || afterInfo.rawUrl || afterInfo.url,
+          cookieBrowser: options.cookieBrowser,
+          cookieFile: options.cookieFile,
           proxy: options.proxy,
           rateLimit: options.rateLimit,
           signal: appState.cancelController.signal,
@@ -402,6 +411,8 @@ export function createConverter({
       ...getConversionOptions(mode),
       ...snapshot,
       mode,
+      source: item?.source || snapshot.source || '',
+      rawUrl: item?.rawUrl || snapshot.rawUrl || item?.url || '',
       modeLabel: modes[mode]?.label || snapshot.modeLabel || 'MP3'
     };
   }

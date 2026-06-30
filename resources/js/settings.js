@@ -15,6 +15,8 @@ const Settings = (() => {
     format:      'mp3',
     videoQuality: 'best',
     videoFormat: 'mp4',
+    cookieBrowser: 'firefox',
+    cookieFile: '',
     embedThumb:  true,
     embedMeta:   true,
     proxy:       '',
