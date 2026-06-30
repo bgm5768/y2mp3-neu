@@ -134,13 +134,20 @@ npm run build
 
 ### GitHub 자동 업데이트 릴리스 준비
 
-`neutralino.config.json`의 `version`을 올린 뒤 다음 명령을 실행합니다.
+`neutralino.config.json`의 `version`을 올린 뒤 변경사항을 `main`에 push합니다. 배포 시점에는 같은 버전의 태그를 push하면 GitHub Actions가 빌드, Release 생성, 업데이트 파일 업로드를 자동으로 처리합니다.
 
 ```bash
-npm run release:prepare
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
-명령이 끝나면 `dist/resources.neu`와 `dist/update.json`이 생성됩니다. GitHub Release 태그를 `v버전` 형식으로 만들고, 두 파일을 릴리스 에셋으로 업로드하면 기존 클라이언트가 GitHub 최신 릴리스의 `update.json`을 확인한 뒤 변경된 `resources.neu`를 내려받습니다.
+태그는 반드시 `neutralino.config.json`의 `version`과 맞아야 합니다. 예를 들어 `version`이 `1.0.1`이면 태그는 `v1.0.1`이어야 합니다.
+
+수동으로 실행하려면 GitHub Actions의 `Release updater package` 워크플로를 실행하면 됩니다. 태그 입력을 비우면 `neutralino.config.json`의 버전으로 `v버전` 태그를 사용합니다.
+
+릴리스가 만들어지면 `dist/resources.neu`와 `dist/update.json`이 Release 에셋으로 올라갑니다. 기존 클라이언트는 GitHub 최신 릴리스의 `update.json`을 확인한 뒤 변경된 `resources.neu`를 내려받습니다.
+
+Release 생성 권한 오류가 나면 GitHub 저장소의 `Settings > Actions > General > Workflow permissions`에서 `Read and write permissions`를 허용하세요.
 
 Neutralino 바이너리 버전이나 실행 파일 자체가 바뀌는 배포는 `resources.neu`만으로 교체되지 않으므로 별도 설치 파일도 함께 배포해야 합니다.
 

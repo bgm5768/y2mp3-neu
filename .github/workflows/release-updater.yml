@@ -1,0 +1,151 @@
+name: Release updater package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag. Empty value uses neutralino.config.json version, for example v1.0.1.'
+        required: false
+        type: string
+      prerelease:
+        description: 'Create the release as a prerelease. Prereleases are not used by the app latest-release updater.'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-updater-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish updater assets
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve release metadata
+        id: meta
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          $config = Get-Content neutralino.config.json -Raw | ConvertFrom-Json
+          $version = [string]$config.version
+
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $tag = $env:GITHUB_REF_NAME
+          } elseif ($env:INPUT_TAG) {
+            $tag = $env:INPUT_TAG
+          } else {
+            $tag = "v$version"
+          }
+
+          if (-not $tag.StartsWith('v')) {
+            $tag = "v$tag"
+          }
+
+          if ($tag -ne "v$version") {
+            throw "Release tag '$tag' does not match neutralino.config.json version '$version'. Use tag 'v$version'."
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Build updater package
+        run: npm run release:prepare
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+
+      - name: Verify updater manifest
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ steps.meta.outputs.version }}
+          EXPECTED_TAG: ${{ steps.meta.outputs.tag }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+        run: |
+          if (-not (Test-Path dist/resources.neu)) {
+            throw 'dist/resources.neu was not generated.'
+          }
+          if (-not (Test-Path dist/update.json)) {
+            throw 'dist/update.json was not generated.'
+          }
+
+          $manifest = Get-Content dist/update.json -Raw | ConvertFrom-Json
+          $expectedUrl = "https://github.com/$env:EXPECTED_REPOSITORY/releases/download/$env:EXPECTED_TAG/resources.neu"
+
+          if ($manifest.version -ne $env:EXPECTED_VERSION) {
+            throw "Manifest version '$($manifest.version)' does not match '$env:EXPECTED_VERSION'."
+          }
+          if ($manifest.resourcesURL -ne $expectedUrl) {
+            throw "Manifest resourcesURL '$($manifest.resourcesURL)' does not match '$expectedUrl'."
+          }
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          PRERELEASE: ${{ github.event.inputs.prerelease }}
+        run: |
+          $releaseExists = $false
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            $releaseExists = $true
+          }
+
+          if ($releaseExists) {
+            gh release upload $env:TAG dist/resources.neu dist/update.json --clobber --repo $env:GITHUB_REPOSITORY
+            exit $LASTEXITCODE
+          }
+
+          $ghArgs = @(
+            'release',
+            'create',
+            $env:TAG,
+            'dist/resources.neu',
+            'dist/update.json',
+            '--repo',
+            $env:GITHUB_REPOSITORY,
+            '--target',
+            $env:GITHUB_SHA,
+            '--title',
+            $env:TAG,
+            '--notes',
+            "Auto update package for $env:TAG"
+          )
+
+          if ($env:PRERELEASE -eq 'true') {
+            $ghArgs += '--prerelease'
+          }
+
+          gh @ghArgs
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-${{ steps.meta.outputs.tag }}
+          path: |
+            dist/resources.neu
+            dist/update.json
