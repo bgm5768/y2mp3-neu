@@ -19,10 +19,7 @@
     "filesystem.*",
     "debug.*",
     "window.*",
-    "clipboard.*",
-    "updater.*",
-    "filesystem.writeBinaryFile",
-    "app.restartProcess"
+    "clipboard.*"
   ],
   "globalVariables": {},
   "modes": {

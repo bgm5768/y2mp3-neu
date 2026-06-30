@@ -73,32 +73,15 @@ jobs:
 
       - name: Build updater package
         run: npm run release:prepare
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
 
-      - name: Verify updater manifest
+      - name: Verify release asset
         shell: pwsh
-        env:
-          EXPECTED_VERSION: ${{ steps.meta.outputs.version }}
-          EXPECTED_TAG: ${{ steps.meta.outputs.tag }}
-          EXPECTED_REPOSITORY: ${{ github.repository }}
         run: |
           if (-not (Test-Path dist/resources.neu)) {
             throw 'dist/resources.neu was not generated.'
           }
-          if (-not (Test-Path dist/update.json)) {
-            throw 'dist/update.json was not generated.'
-          }
-
-          $manifest = Get-Content dist/update.json -Raw | ConvertFrom-Json
-          $expectedUrl = "https://github.com/$env:EXPECTED_REPOSITORY/releases/download/$env:EXPECTED_TAG/resources.neu"
-
-          if ($manifest.version -ne $env:EXPECTED_VERSION) {
-            throw "Manifest version '$($manifest.version)' does not match '$env:EXPECTED_VERSION'."
-          }
-          if ($manifest.resourcesURL -ne $expectedUrl) {
-            throw "Manifest resourcesURL '$($manifest.resourcesURL)' does not match '$expectedUrl'."
+          if ((Get-Item dist/resources.neu).Length -lt 1024) {
+            throw 'dist/resources.neu is too small.'
           }
 
       - name: Create or update GitHub Release
@@ -110,13 +93,24 @@ jobs:
           PRERELEASE: ${{ github.event.inputs.prerelease }}
         run: |
           $releaseExists = $false
-          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:TAG" 2>$null
           if ($LASTEXITCODE -eq 0) {
             $releaseExists = $true
           }
 
           if ($releaseExists) {
-            gh release upload $env:TAG dist/resources.neu dist/update.json --clobber --repo $env:GITHUB_REPOSITORY
+            $release = $releaseJson | ConvertFrom-Json
+            $isPrerelease = $env:PRERELEASE -eq 'true'
+            $makeLatest = if ($isPrerelease) { 'false' } else { 'true' }
+            $payload = @{
+              draft = $false
+              prerelease = $isPrerelease
+              make_latest = $makeLatest
+            } | ConvertTo-Json -Compress
+
+            $payload | gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" --input -
+            gh release delete-asset $env:TAG update.json -y --repo $env:GITHUB_REPOSITORY 2>$null
+            gh release upload $env:TAG dist/resources.neu --clobber --repo $env:GITHUB_REPOSITORY
             exit $LASTEXITCODE
           }
 
@@ -125,7 +119,6 @@ jobs:
             'create',
             $env:TAG,
             'dist/resources.neu',
-            'dist/update.json',
             '--repo',
             $env:GITHUB_REPOSITORY,
             '--target',
@@ -148,4 +141,3 @@ jobs:
           name: updater-${{ steps.meta.outputs.tag }}
           path: |
             dist/resources.neu
-            dist/update.json
