@@ -6,7 +6,9 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
     "dev": "neu run",
-    "build": "neu build"
+    "build": "neu build",
+    "update:manifest": "node scripts/generate-update-manifest.js",
+    "release:prepare": "npm run build && npm run update:manifest"
   },
   "dependencies": {
     "yt-dlp-wrap": "^2.3.12",

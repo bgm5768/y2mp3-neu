@@ -271,6 +271,40 @@
         <h1>설정</h1>
       </div>
 
+      <div class="card settings-card">
+        <h2 class="settings-section-title">앱 업데이트</h2>
+        <p id="app-update-status" class="settings-desc app-update-status">
+          GitHub 릴리스에서 새 resources.neu를 자동으로 확인합니다.
+        </p>
+        <div class="settings-group app-update-row">
+          <div class="storage-current">
+            <span class="radio-icon">↻</span>
+            <span>
+              <strong>현재 버전</strong>
+              <small id="app-current-version">-</small>
+            </span>
+          </div>
+          <div class="storage-current">
+            <span class="radio-icon">⬇</span>
+            <span>
+              <strong>최신 버전</strong>
+              <small id="app-latest-version">확인 전</small>
+            </span>
+          </div>
+        </div>
+        <div class="settings-group app-update-actions">
+          <label class="toggle-label">
+            <input id="auto-update-toggle" type="checkbox" checked />
+            <span>시작할 때 자동으로 업데이트 확인 및 설치</span>
+          </label>
+          <div class="app-update-buttons">
+            <button id="app-update-check-btn" class="btn btn-secondary btn-sm">업데이트 확인</button>
+            <button id="app-update-restart-btn" class="btn btn-primary btn-sm hidden">재시작해서 적용</button>
+            <a id="app-release-link" class="btn btn-ghost btn-sm hidden" href="#" target="_blank" rel="noreferrer">릴리스 보기</a>
+          </div>
+        </div>
+      </div>
+
       <!-- 저장 위치 -->
       <div class="card settings-card">
         <h2 class="settings-section-title">💾 저장 위치</h2>

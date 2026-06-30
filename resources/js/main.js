@@ -30,6 +30,7 @@ function initTabs({ Toast, DependencyUI, getPlayer }) {
 async function loadModules() {
   const [
     { createAppState },
+    { createAppUpdater },
     { Toast },
     { createDependencyUi },
     { createQueueUi },
@@ -39,6 +40,7 @@ async function loadModules() {
     { installWindowGuard }
   ] = await Promise.all([
     import('./core/app-state.js'),
+    import('./core/app-updater.js'),
     import('./ui/toast.js'),
     import('./ui/dependency-ui.js'),
     import('./converter/queue-ui.js'),
@@ -49,6 +51,7 @@ async function loadModules() {
   ]);
 
   const appState = createAppState();
+  const AppUpdater = createAppUpdater({ Neutralino, Settings, Toast });
   const DependencyUI = createDependencyUi({ appState });
   const QueueUI = createQueueUi({ Queue, appState });
   const getPlayer = () => Player;
@@ -65,12 +68,12 @@ async function loadModules() {
     DependencyUI,
     getPlayer
   });
-  const SettingsUI = createSettingsUi({ Settings, Neutralino, YTDlp, Toast, DependencyUI, getPlayer });
+  const SettingsUI = createSettingsUi({ Settings, Neutralino, YTDlp, Toast, DependencyUI, AppUpdater, getPlayer });
 
   DependencyUI.setGateChangeHandler(Converter.updateConvertButton);
   installWindowGuard(Neutralino);
 
-  return { Toast, DependencyUI, Converter, SettingsUI, getPlayer };
+  return { Toast, DependencyUI, Converter, SettingsUI, AppUpdater, getPlayer };
 }
 
 Neutralino.init();
@@ -86,7 +89,7 @@ Neutralino.events.on('windowClose', () => Neutralino.app.exit());
     return;
   }
 
-  const { Toast, DependencyUI, Converter, SettingsUI, getPlayer } = modules;
+  const { Toast, DependencyUI, Converter, SettingsUI, AppUpdater, getPlayer } = modules;
 
   try {
     DependencyUI.restoreDepsStatus();
@@ -100,6 +103,7 @@ Neutralino.events.on('windowClose', () => Neutralino.app.exit());
   Player.init();
   SettingsUI.initSettingsTab();
   void Player.loadLibrary({ force: true });
+  void AppUpdater.checkAndInstall().catch(() => {});
 
   void Converter.ensureRequiredToolsInstalled().catch(e => {
     Toast.show(`필수 도구 확인 실패: ${e.message || e}`, 'error', 8000);

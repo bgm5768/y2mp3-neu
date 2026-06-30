@@ -132,6 +132,18 @@ npm run build
 
 빌드 결과물은 Neutralinojs 설정에 따라 `dist/` 아래에 생성됩니다.
 
+### GitHub 자동 업데이트 릴리스 준비
+
+`neutralino.config.json`의 `version`을 올린 뒤 다음 명령을 실행합니다.
+
+```bash
+npm run release:prepare
+```
+
+명령이 끝나면 `dist/resources.neu`와 `dist/update.json`이 생성됩니다. GitHub Release 태그를 `v버전` 형식으로 만들고, 두 파일을 릴리스 에셋으로 업로드하면 기존 클라이언트가 GitHub 최신 릴리스의 `update.json`을 확인한 뒤 변경된 `resources.neu`를 내려받습니다.
+
+Neutralino 바이너리 버전이나 실행 파일 자체가 바뀌는 배포는 `resources.neu`만으로 교체되지 않으므로 별도 설치 파일도 함께 배포해야 합니다.
+
 ## 의존성 도구 위치
 
 앱은 ffmpeg와 yt-dlp를 다음 순서로 찾습니다.
@@ -183,6 +195,7 @@ mp3ver3/
 │     └─ native-safety.js
 └─ scripts/
    ├─ postinstall.js
+   ├─ generate-update-manifest.js
    └─ postbuild.js
 ```
 
@@ -235,6 +248,7 @@ mp3ver3/
 | 파일 | 역할 |
 | --- | --- |
 | `scripts/postinstall.js` | npm 설치 후 yt-dlp, ffmpeg, Neutralinojs 바이너리를 준비 |
+| `scripts/generate-update-manifest.js` | GitHub Release 자동 업데이트용 `dist/resources.neu`, `dist/update.json` 생성 |
 | `scripts/postbuild.js` | 빌드 후처리용 파일입니다. 현재 내용은 비어 있습니다. |
 
 ### `extension/`

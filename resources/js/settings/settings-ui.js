@@ -6,7 +6,7 @@
 import { el } from '../core/dom.js';
 import { Dialog } from '../ui/dialog.js';
 
-export function createSettingsUi({ Settings, Neutralino, YTDlp, Toast, DependencyUI, getPlayer }) {
+export function createSettingsUi({ Settings, Neutralino, YTDlp, Toast, DependencyUI, AppUpdater, getPlayer }) {
   const cookieBrowsers = {
     chrome: { label: 'Chrome', process: 'chrome.exe' },
     edge: { label: 'Edge', process: 'msedge.exe' },
@@ -19,6 +19,30 @@ export function createSettingsUi({ Settings, Neutralino, YTDlp, Toast, Dependenc
 
   function getSelectedCookieBrowser() {
     return cookieBrowsers[el('cookie-browser-select')?.value || ''] || null;
+  }
+
+  function renderUpdateStatus(state = AppUpdater?.getState?.() || {}) {
+    const currentEl = el('app-current-version');
+    const latestEl = el('app-latest-version');
+    const statusEl = el('app-update-status');
+    const checkBtn = el('app-update-check-btn');
+    const restartBtn = el('app-update-restart-btn');
+    const releaseLink = el('app-release-link');
+
+    if (currentEl) currentEl.textContent = state.currentVersion || window.NL_APPVERSION || '-';
+    if (latestEl) latestEl.textContent = state.latestVersion || '확인 전';
+    if (statusEl) {
+      statusEl.textContent = state.lastError
+        ? state.lastError
+        : (state.lastMessage || 'GitHub 릴리스에서 새 resources.neu를 자동으로 확인합니다.');
+      statusEl.className = `settings-desc app-update-status ${state.lastError ? 'status-error' : ''}`;
+    }
+    if (checkBtn) checkBtn.disabled = !!state.checking || !!state.installing;
+    if (restartBtn) restartBtn.classList.toggle('hidden', !state.updateReady);
+    if (releaseLink) {
+      releaseLink.classList.toggle('hidden', !state.latestReleaseUrl);
+      if (state.latestReleaseUrl) releaseLink.href = state.latestReleaseUrl;
+    }
   }
 
   async function isProcessRunning(processName) {
@@ -49,6 +73,24 @@ export function createSettingsUi({ Settings, Neutralino, YTDlp, Toast, Dependenc
   }
 
   function initSettingsTab() {
+    AppUpdater?.setStatusRenderer?.(renderUpdateStatus);
+
+    el('app-update-check-btn')?.addEventListener('click', async () => {
+      const btn = el('app-update-check-btn');
+      if (btn) btn.disabled = true;
+      try {
+        await AppUpdater.checkAndInstall({ manual: true, force: true });
+      } catch (e) {
+        Toast.show(`업데이트 확인 실패: ${e.message || e}`, 'error', 8000);
+      } finally {
+        renderUpdateStatus();
+      }
+    });
+
+    el('app-update-restart-btn')?.addEventListener('click', () => {
+      void AppUpdater?.restart?.();
+    });
+
     const folderBtns = [
       {
         btn: 'music-path-btn',
@@ -242,11 +284,13 @@ export function createSettingsUi({ Settings, Neutralino, YTDlp, Toast, Dependenc
       const videoQuality = el('video-quality-select')?.value || 'best';
       const videoFormat = el('video-format-select')?.value || 'mp4';
       const cookieBrowser = el('cookie-browser-select')?.value || '';
+      const autoUpdateEnabled = el('auto-update-toggle')?.checked !== false;
       const embedThumb = true;
       const embedMeta = true;
-      await Settings.save({ saveDest: 'local', quality, format, videoQuality, videoFormat, cookieBrowser, embedThumb, embedMeta });
+      await Settings.save({ saveDest: 'local', quality, format, videoQuality, videoFormat, cookieBrowser, autoUpdateEnabled, embedThumb, embedMeta });
       getPlayer()?.invalidate();
       Toast.show('설정이 저장되었습니다.', 'success');
+      renderUpdateStatus();
     });
   }
 
@@ -262,6 +306,8 @@ export function createSettingsUi({ Settings, Neutralino, YTDlp, Toast, Dependenc
     if (el('cookie-browser-select')) el('cookie-browser-select').value = s.cookieBrowser || '';
     const cookieFileDisplay = el('cookie-file-display');
     if (cookieFileDisplay) cookieFileDisplay.textContent = s.cookieFile || '선택 안 됨';
+    if (el('auto-update-toggle')) el('auto-update-toggle').checked = s.autoUpdateEnabled !== false;
+    renderUpdateStatus();
   }
 
   async function ensureDefaultLocalPath(s) {
