@@ -1596,17 +1596,6 @@ input[type="checkbox"] {
 .radio-box strong { display: block; font-size: 14px; }
 .radio-box small { color: var(--text-muted); font-size: 12px; display: block; }
 
-.cookie-file-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.cookie-file-row .option-label {
-  min-width: min(260px, 100%);
-  flex: 1;
-}
-
 .dep-row {
   display: flex;
   align-items: center;

@@ -15,8 +15,6 @@ const Settings = (() => {
     format:      'mp3',
     videoQuality: 'best',
     videoFormat: 'mp4',
-    cookieBrowser: 'firefox',
-    cookieFile: '',
     embedThumb:  true,
     embedMeta:   true,
     proxy:       '',
@@ -46,6 +44,8 @@ const Settings = (() => {
     if (!next.musicPath && next.localPath) next.musicPath = next.localPath;
     if (!next.localPath && next.musicPath) next.localPath = next.musicPath;
     if (!next.videoPath) next.videoPath = next.musicPath || next.localPath || '';
+    delete next.cookieBrowser;
+    delete next.cookieFile;
 
     return next;
   }

@@ -161,7 +161,6 @@ mp3ver3/
 ├─ package-lock.json
 ├─ neutralino.config.json
 ├─ README.md
-├─ cookies.txt
 ├─ bin/
 ├─ dist/
 ├─ extension/
@@ -196,7 +195,6 @@ mp3ver3/
 | `package.json` | npm 스크립트와 Node 의존성 정의 |
 | `package-lock.json` | npm 의존성 잠금 파일 |
 | `neutralino.config.json` | Neutralinojs 앱 설정, 창 크기, 권한, 빌드 옵션 정의 |
-| `cookies.txt` | YouTube 인증이 필요한 영상에 사용할 수 있는 쿠키 파일 |
 | `README.md` | 프로젝트 기능과 구조 문서 |
 
 ### `resources/`

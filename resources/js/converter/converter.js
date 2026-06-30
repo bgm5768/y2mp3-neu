@@ -206,9 +206,7 @@ export function createConverter({
       embedMeta: true,
       savePath: Settings.getActiveSavePath(mode),
       proxy: settings.useProxy ? settings.proxy : '',
-      rateLimit: settings.useRateLimit ? `${settings.rateLimitVal}${settings.rateLimitUnit}` : '',
-      cookieBrowser: document.getElementById('cookie-browser-select')?.value ?? settings.cookieBrowser ?? '',
-      cookieFile: settings.cookieFile || ''
+      rateLimit: settings.useRateLimit ? `${settings.rateLimitVal}${settings.rateLimitUnit}` : ''
     };
   }
 
@@ -329,8 +327,6 @@ export function createConverter({
           savePath: options.savePath,
           source: options.source,
           rawUrl: options.rawUrl || afterInfo.rawUrl || afterInfo.url,
-          cookieBrowser: options.cookieBrowser,
-          cookieFile: options.cookieFile,
           proxy: options.proxy,
           rateLimit: options.rateLimit,
           signal: appState.cancelController.signal,

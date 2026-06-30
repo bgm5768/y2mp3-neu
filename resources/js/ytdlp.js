@@ -608,7 +608,7 @@ const YTDlp = (() => {
       return { ok: false, message: 'cookies.txt 파일이 비어 있습니다.' };
     }
     if (/^[\[{]/.test(content)) {
-      return { ok: false, message: 'cookies.txt가 Netscape 형식이 아닙니다. 브라우저 확장에서 "Netscape cookies.txt" 형식으로 다시 내보내세요.' };
+      return { ok: false, message: 'Firefox 쿠키 파일을 읽을 수 없습니다. Firefox에서 Douyin 페이지를 연 뒤 다시 시도하세요.' };
     }
 
     const cookies = parseCookieFileText(content);
@@ -622,7 +622,7 @@ const YTDlp = (() => {
       )
     );
     if (!douyinCookies.length) {
-      return { ok: false, message: 'cookies.txt 안에 Douyin 쿠키가 없습니다. Douyin 페이지에서 현재 사이트 쿠키를 다시 내보낸 파일을 선택하세요.' };
+      return { ok: false, message: 'Firefox에서 Douyin 페이지를 연 뒤 다시 시도하세요.' };
     }
 
     const nowSeconds = Math.floor(Date.now() / 1000);
@@ -630,7 +630,7 @@ const YTDlp = (() => {
       cookie.expiry === 0 || cookie.expiry > nowSeconds
     );
     if (!activeCookies.length) {
-      return { ok: false, message: 'cookies.txt 안의 Douyin 쿠키가 모두 만료되었습니다. Douyin을 브라우저에서 다시 연 뒤 cookies.txt를 새로 내보내세요.' };
+      return { ok: false, message: 'Douyin 쿠키가 만료되었습니다. Firefox에서 Douyin 페이지를 다시 연 뒤 시도하세요.' };
     }
 
     const hasUsefulCookie = activeCookies.some(cookie =>
@@ -641,7 +641,7 @@ const YTDlp = (() => {
       ok: true,
       warning: hasUsefulCookie
         ? ''
-        : 'Douyin 도메인 쿠키는 있지만 세션 쿠키가 부족할 수 있습니다. 실패하면 Douyin을 새로 연 뒤 현재 사이트 쿠키를 다시 내보내세요.'
+        : 'Douyin 도메인 쿠키는 있지만 세션 쿠키가 부족할 수 있습니다. 실패하면 Firefox에서 Douyin을 새로 연 뒤 다시 시도하세요.'
     };
   }
 
@@ -654,12 +654,6 @@ const YTDlp = (() => {
     } catch {
       return { ok: false, message: 'cookies.txt 파일을 읽을 수 없습니다. 파일 경로와 권한을 확인하세요.' };
     }
-  }
-
-  async function validateCookieFileForSource(source, cookieFile) {
-    const result = await inspectCookieFileForSource(source, cookieFile);
-    if (!result.ok) throw new Error(result.message || 'cookies.txt 파일을 확인할 수 없습니다.');
-    return result;
   }
 
   function defaultCookieUrlForSource(source) {
@@ -796,7 +790,7 @@ const YTDlp = (() => {
         return result.cookieFile;
       } catch (e) {
         if (!cookieFile) throw e;
-        onProgress && onProgress(4, '', 'Firefox 자동 쿠키 갱신 실패, 저장된 cookies.txt 확인 중', 'download');
+        onProgress && onProgress(4, '', 'Firefox 자동 쿠키 갱신 실패, 기존 쿠키 파일 확인 중', 'download');
       }
     }
 
@@ -875,16 +869,16 @@ const YTDlp = (() => {
 
   function browserCookieCopyErrorMessage(cookieBrowser) {
     const browser = cookieBrowserLabel(cookieBrowser);
-    return `${browser} 쿠키 데이터베이스가 잠겨 있습니다. 설정 > 사이트 쿠키에서 브라우저 프로세스 정리를 누른 뒤 다시 시도하거나, cookies.txt를 지정해 주세요.`;
+    return `${browser} 쿠키 데이터베이스가 잠겨 있습니다. ${browser}를 완전히 종료한 뒤 다시 시도하세요.`;
   }
 
   function chromiumDpapiCookieErrorMessage(cookieBrowser) {
     const browser = cookieBrowserLabel(cookieBrowser);
-    return `${browser} 쿠키는 Windows DPAPI/App-Bound 보호 때문에 yt-dlp가 복호화할 수 없습니다. 설정 > 사이트 쿠키에서 Firefox를 선택하고 Firefox에서 Douyin에 한 번 접속한 뒤 다시 시도하거나, cookies.txt를 지정해 주세요.`;
+    return `${browser} 쿠키는 Windows DPAPI/App-Bound 보호 때문에 사용할 수 없습니다. Firefox에서 Douyin에 한 번 접속한 뒤 다시 시도하세요.`;
   }
 
   function douyinCookieErrorMessage() {
-    return 'Douyin이 받은 쿠키를 최신 세션으로 인정하지 않았습니다. cookies.txt를 쓰는 중이면 Douyin 페이지를 새로 열고 현재 사이트 쿠키를 다시 내보낸 파일로 교체하세요. 브라우저 쿠키를 쓰는 중이면 Firefox에서 Douyin을 한 번 연 뒤 다시 시도하세요.';
+    return 'Douyin이 받은 쿠키를 최신 세션으로 인정하지 않았습니다. Firefox에서 Douyin 페이지를 한 번 연 뒤 다시 시도하세요.';
   }
 
   async function douyinDownloadErrorMessage({ source, errorText, cookieFile }) {
@@ -1867,5 +1861,5 @@ const YTDlp = (() => {
     return `${m}:${s}`;
   }
 
-  return { checkDeps, getVideoInfo, download, downloadVideo, inspectCookieFileForSource, refreshCookieFileFromBrowser, updateYtdlp, installYtdlp, installFfmpeg, cancelActiveDownload, cleanupTempScripts };
+  return { checkDeps, getVideoInfo, download, downloadVideo, updateYtdlp, installYtdlp, installFfmpeg, cancelActiveDownload, cleanupTempScripts };
 })();
