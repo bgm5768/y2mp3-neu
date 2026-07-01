@@ -51,6 +51,7 @@ let fileName = null;
 let trackTitle = null;
 let directoryName = null;
 let normalizeRenameFileName = null;
+let validateFileName = null;
 let pathExists = null;
 let formatBytes = null;
 let sortTracks = null;
@@ -238,7 +239,7 @@ function ensureTrackMenu() {
     } else if (action === 'add-playlist') {
       void addTrackToPlaylist(trackId).then(result => autoplayAddedTrackIfIdle(result));
     } else if (action === 'remove-playlist') {
-      removeTrackFromActivePlaylist(trackId);
+      void removeTrackFromActivePlaylist(trackId);
     } else if (action === 'remove') {
       void removeTrackFile(trackId);
     }
@@ -310,6 +311,26 @@ function clearTrackSelection() {
   renderList();
 }
 
+function toggleMusicFolder(folderPath, currentlyExpanded = false) {
+  const key = String(folderPath || '').trim();
+  if (!key) return;
+  if (!(state.folderCollapsedPaths instanceof Set)) {
+    state.folderCollapsedPaths = new Set(Array.isArray(state.folderCollapsedPaths) ? state.folderCollapsedPaths : []);
+  }
+  if (!(state.folderExpandedPaths instanceof Set)) {
+    state.folderExpandedPaths = new Set(Array.isArray(state.folderExpandedPaths) ? state.folderExpandedPaths : []);
+  }
+  if (currentlyExpanded) {
+    state.folderExpandedPaths.delete(key);
+    state.folderCollapsedPaths.add(key);
+  } else {
+    state.folderCollapsedPaths.delete(key);
+    state.folderExpandedPaths.add(key);
+  }
+  closeTrackMenu();
+  renderList();
+}
+
 function normalizeTrackPathKey(path) {
   return String(path || '').replace(/\//g, '\\').toLowerCase();
 }
@@ -364,7 +385,7 @@ async function addFilesToPlaylist(filePaths, playlistId) {
     .filter(track => wanted.has(normalizeTrackPathKey(track.path)) || wanted.has(normalizeTrackPathKey(track.id)))
     .map(track => track.id);
 
-  const result = addKnownTrackIdsToPlaylist(trackIds, playlistId, { silent: true });
+  const result = await addKnownTrackIdsToPlaylist(trackIds, playlistId, { silent: true });
   render();
   await autoplayAddedTrackIfIdle(result, { requirePlayerTab: true });
   return {
@@ -742,6 +763,10 @@ async function loadLibrary({ force = false } = {}) {
 
     if (!tracks.length && lastError) throw lastError;
 
+    if (state.loadedPath && state.loadedPath.toLowerCase() !== loadedPath.toLowerCase()) {
+      state.folderCollapsedPaths?.clear?.();
+      state.folderExpandedPaths?.clear?.();
+    }
     state.tracks = mergeKnownTrackData(tracks);
     state.loadedPath = loadedPath;
     trimMissingPlaylistTracks();
@@ -1060,6 +1085,8 @@ function invalidate() {
     state.restoredLastTrack = false;
     state.restoredPreviewTime = null;
     state.seekPreviewTime = null;
+    state.folderCollapsedPaths?.clear?.();
+    state.folderExpandedPaths?.clear?.();
     setText('player-path', `현재 저장 위치: ${activePath}`);
     setText('player-summary', `음악 파일을 불러오는 중… ${activePath}`);
     render();
@@ -1239,6 +1266,14 @@ function init() {
       return;
     }
 
+    const folderButton = e.target.closest('button[data-player-action="toggle-folder"]');
+    if (folderButton) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleMusicFolder(folderButton.dataset.folderPath || '', folderButton.getAttribute('aria-expanded') === 'true');
+      return;
+    }
+
     const menuButton = e.target.closest('button[data-player-action="menu"]');
     if (menuButton) {
       e.preventDefault();
@@ -1299,6 +1334,7 @@ export function createPlayer(dependencies = {}) {
     trackTitle,
     directoryName,
     normalizeRenameFileName,
+    validateFileName,
     pathExists,
     formatBytes,
     sortTracks,
@@ -1328,7 +1364,22 @@ export function createPlayer(dependencies = {}) {
     findFrameOffsetNear
   }));
 
-  configurePlaylist({ Toast, savePlayerSettings, sortTracks, clearAudioSource, currentTrack, rebuildQueue, hydrateTrackDurations, Dialog });
+  configurePlaylist({
+    Toast,
+    Settings,
+    Neutralino,
+    savePlayerSettings,
+    sortTracks,
+    clearAudioSource,
+    currentTrack,
+    hydrateTrackDurations,
+    joinPath,
+    directoryName,
+    fileName,
+    pathExists,
+    validateFileName,
+    Dialog
+  });
 
   configurePlayerUi({
     currentTrack,

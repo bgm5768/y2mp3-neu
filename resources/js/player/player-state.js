@@ -15,6 +15,8 @@ export const playerState = {
   sortDirection: 'asc',
   activePlaylistId: 'all',
   playlists: [],
+  folderCollapsedPaths: new Set(),
+  folderExpandedPaths: new Set(),
   sortMetricLoading: false,
   durationHydrationToken: 0,
   orderMode: 'normal',

@@ -298,6 +298,252 @@ function hydrateVisibleThumbnails(filteredTracks) {
   });
 }
 
+function ensureFolderCollapsedSet() {
+  if (state.folderCollapsedPaths instanceof Set) return state.folderCollapsedPaths;
+  state.folderCollapsedPaths = new Set(Array.isArray(state.folderCollapsedPaths) ? state.folderCollapsedPaths : []);
+  return state.folderCollapsedPaths;
+}
+
+function ensureFolderExpandedSet() {
+  if (state.folderExpandedPaths instanceof Set) return state.folderExpandedPaths;
+  state.folderExpandedPaths = new Set(Array.isArray(state.folderExpandedPaths) ? state.folderExpandedPaths : []);
+  return state.folderExpandedPaths;
+}
+
+function isFolderCollapsedByDefault(node, depth, query) {
+  if (query) return false;
+  const collapsedSet = ensureFolderCollapsedSet();
+  const expandedSet = ensureFolderExpandedSet();
+  if (expandedSet.has(node.path)) return false;
+  if (collapsedSet.has(node.path)) return true;
+  return depth > 0;
+}
+
+function normalizePath(path) {
+  return String(path || '').replace(/\//g, '\\');
+}
+
+function normalizeFolderPath(path) {
+  return normalizePath(path).replace(/^[\\]+|[\\]+$/g, '').replace(/[\\]+/g, '\\');
+}
+
+function directoryName(path) {
+  const value = normalizePath(path);
+  const index = value.lastIndexOf('\\');
+  return index >= 0 ? value.slice(0, index) : '';
+}
+
+function relativeTrackFolder(track) {
+  const dir = normalizePath(directoryName(track?.path));
+  const root = normalizePath(state.loadedPath).replace(/[\\]+$/g, '');
+  if (!dir) return '';
+  if (root && dir.toLocaleLowerCase() === root.toLocaleLowerCase()) return '';
+  if (root && dir.toLocaleLowerCase().startsWith(`${root.toLocaleLowerCase()}\\`)) {
+    return normalizeFolderPath(dir.slice(root.length));
+  }
+  return normalizeFolderPath(dir);
+}
+
+function createFolderNode(name = '', path = '') {
+  return {
+    name,
+    path,
+    tracks: [],
+    children: new Map(),
+    count: 0
+  };
+}
+
+function ensureChildFolder(parent, name, path) {
+  const key = name.toLocaleLowerCase();
+  if (!parent.children.has(key)) {
+    parent.children.set(key, createFolderNode(name, path));
+  }
+  return parent.children.get(key);
+}
+
+function buildMusicFolderTree(trackEntries) {
+  const root = createFolderNode('내 음악', '');
+
+  trackEntries.forEach(entry => {
+    const folder = relativeTrackFolder(entry.track);
+    if (!folder) {
+      root.tracks.push(entry);
+      return;
+    }
+
+    let node = root;
+    const parts = folder.split('\\').filter(Boolean);
+    const pathParts = [];
+    parts.forEach(part => {
+      pathParts.push(part);
+      node = ensureChildFolder(node, part, pathParts.join('\\'));
+    });
+    node.tracks.push(entry);
+  });
+
+  function countTracks(node) {
+    let count = node.tracks.length;
+    node.children.forEach(child => {
+      count += countTracks(child);
+    });
+    node.count = count;
+    return count;
+  }
+
+  countTracks(root);
+  return root;
+}
+
+function sortedFolderChildren(node) {
+  return [...node.children.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, 'ko', { numeric: true, sensitivity: 'base' })
+  );
+}
+
+function countFolders(node) {
+  let count = node.children.size;
+  node.children.forEach(child => {
+    count += countFolders(child);
+  });
+  return count;
+}
+
+function createFolderRow(node, depth, query) {
+  const isCollapsed = isFolderCollapsedByDefault(node, depth, query);
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = `player-folder-row ${isCollapsed ? 'is-collapsed' : 'is-expanded'}`;
+  row.dataset.playerAction = 'toggle-folder';
+  row.dataset.folderPath = node.path;
+  row.style.setProperty('--folder-offset', `${depth * 18}px`);
+  row.title = node.path || node.name;
+  row.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+
+  const chevron = document.createElement('span');
+  chevron.className = 'player-folder-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+
+  const icon = document.createElement('span');
+  icon.className = 'player-folder-icon';
+  icon.setAttribute('aria-hidden', 'true');
+
+  const name = document.createElement('span');
+  name.className = 'player-folder-name';
+  name.textContent = node.name;
+
+  const count = document.createElement('span');
+  count.className = 'player-folder-count';
+  count.textContent = `${node.count}곡`;
+
+  row.append(chevron, icon, name, count);
+  return row;
+}
+
+function createTrackItem({ track, index }, canSelectTracks, selectedIds, depth = 0) {
+  const item = document.createElement('div');
+  item.className = `player-track ${index === state.queuePosition ? 'active' : ''}`;
+  const isSelected = selectedIds.has(track.id);
+  item.classList.toggle('is-selectable', canSelectTracks);
+  item.classList.toggle('is-selected', isSelected);
+  item.classList.toggle('in-folder', depth > 0);
+  if (depth > 0) item.style.setProperty('--track-folder-offset', `${Math.max(0, depth - 1) * 18}px`);
+  item.dataset.index = String(index);
+  item.dataset.trackId = track.id;
+  item.setAttribute('role', 'button');
+  item.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+  item.tabIndex = 0;
+
+  if (canSelectTracks) {
+    const selectLabel = document.createElement('label');
+    selectLabel.className = 'player-track-select';
+    selectLabel.title = `${track.title || track.fileName} 선택`;
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = isSelected;
+    checkbox.dataset.playerAction = 'select-track';
+    checkbox.dataset.trackId = track.id;
+    checkbox.setAttribute('aria-label', `${track.title || track.fileName} 선택`);
+    selectLabel.appendChild(checkbox);
+    item.appendChild(selectLabel);
+  }
+
+  const thumbnail = document.createElement('span');
+  thumbnail.className = 'player-track-thumbnail';
+  const thumbnailUrl = trackThumbnailUrl(track);
+  if (thumbnailUrl) {
+    const img = document.createElement('img');
+    img.src = thumbnailUrl;
+    img.alt = '';
+    thumbnail.appendChild(img);
+    thumbnail.classList.add('has-image');
+  } else {
+    thumbnail.textContent = '♪';
+  }
+
+  const info = document.createElement('span');
+  info.className = 'player-track-info';
+  const title = document.createElement('span');
+  title.className = 'player-track-title';
+  title.textContent = track.title;
+  const meta = document.createElement('span');
+  meta.className = 'player-track-meta';
+  meta.textContent = [metadataLine(track), track.fileName, formatBytes(track.size)].filter(Boolean).join(' · ');
+  info.append(title, meta);
+
+  const duration = document.createElement('span');
+  duration.className = 'player-track-duration';
+  duration.textContent = displayDuration(track)
+    ? formatTime(displayDuration(track))
+    : '';
+
+  const action = document.createElement('span');
+  action.className = 'player-track-action';
+  action.textContent = index === state.queuePosition ? '재생 중' : '대기';
+
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'player-track-more';
+  more.dataset.playerAction = 'menu';
+  more.dataset.trackId = track.id;
+  more.title = '더보기';
+  more.setAttribute('aria-label', `${track.title || track.fileName} 더보기`);
+  more.setAttribute('aria-haspopup', 'menu');
+  more.setAttribute('aria-expanded', state.openMenuTrackId === track.id ? 'true' : 'false');
+  more.textContent = '⋮';
+
+  item.append(thumbnail, info, duration, action, more);
+  return item;
+}
+
+function renderTrackEntries(list, entries, canSelectTracks, selectedIds, depth = 0) {
+  entries.forEach(entry => {
+    list.appendChild(createTrackItem(entry, canSelectTracks, selectedIds, depth));
+  });
+}
+
+function renderFolderNode(list, node, depth, query, canSelectTracks, selectedIds, visibleEntries) {
+  const isCollapsed = isFolderCollapsedByDefault(node, depth, query);
+  list.appendChild(createFolderRow(node, depth, query));
+  if (isCollapsed) return;
+
+  renderTrackEntries(list, node.tracks, canSelectTracks, selectedIds, depth + 1);
+  visibleEntries.push(...node.tracks);
+  sortedFolderChildren(node).forEach(child => {
+    renderFolderNode(list, child, depth + 1, query, canSelectTracks, selectedIds, visibleEntries);
+  });
+}
+
+function renderMusicFolderTree(list, root, query, canSelectTracks, selectedIds) {
+  const visibleEntries = [];
+  renderTrackEntries(list, root.tracks, canSelectTracks, selectedIds);
+  visibleEntries.push(...root.tracks);
+  sortedFolderChildren(root).forEach(child => {
+    renderFolderNode(list, child, 0, query, canSelectTracks, selectedIds, visibleEntries);
+  });
+  return visibleEntries;
+}
+
 export function setCurrentArtwork(track) {
   const art = el('player-art');
   if (!art) return;
@@ -414,7 +660,7 @@ export function renderList() {
     .map((track, index) => ({ track, index }))
     .filter(({ track }) => {
       if (!query) return true;
-      return [track.title, track.fileName]
+      return [track.title, track.fileName, relativeTrackFolder(track)]
         .some(value => String(value || '').toLowerCase().includes(query));
     });
   const canSelectTracks = !playlist && sourceTracks.length > 0;
@@ -423,9 +669,8 @@ export function renderList() {
   [...selectedIds].forEach(trackId => {
     if (!canSelectTracks || !sourceIds.has(trackId)) selectedIds.delete(trackId);
   });
-  updateSelectionBar(canSelectTracks, filteredTracks);
-  purgeUnusedThumbnailUrls(new Set(filteredTracks.map(({ track }) => track.id)));
-  hydrateVisibleThumbnails(filteredTracks);
+  const folderTree = !playlist ? buildMusicFolderTree(filteredTracks) : null;
+  let renderedTracks = filteredTracks;
 
   if (empty) {
     empty.classList.toggle('hidden', sourceTracks.length > 0 && filteredTracks.length > 0);
@@ -436,84 +681,21 @@ export function renderList() {
   if (summary) {
     const sortText = `${sortLabel()} · ${sortDirectionLabel()}`;
     const scopeText = playlist ? activePlaylistName() : '내 음악';
+    const folderCount = folderTree ? countFolders(folderTree) : 0;
+    const folderText = folderCount ? ` · ${folderCount}개 폴더` : '';
     summary.textContent = state.tracks.length
-      ? (query ? `검색 결과 ${filteredTracks.length}개 · ${scopeText} ${sourceTracks.length}곡 · ${sortText}` : `${sourceTracks.length}곡 · ${sortText}`)
+      ? (query ? `검색 결과 ${filteredTracks.length}개 · ${scopeText} ${sourceTracks.length}곡${folderText} · ${sortText}` : `${sourceTracks.length}곡${folderText} · ${sortText}`)
       : '음악 파일 0개';
   }
 
-  filteredTracks.forEach(({ track, index }) => {
-    const item = document.createElement('div');
-    item.className = `player-track ${index === state.queuePosition ? 'active' : ''}`;
-    const isSelected = selectedIds.has(track.id);
-    item.classList.toggle('is-selectable', canSelectTracks);
-    item.classList.toggle('is-selected', isSelected);
-    item.dataset.index = String(index);
-    item.dataset.trackId = track.id;
-    item.setAttribute('role', 'button');
-    item.setAttribute('aria-selected', isSelected ? 'true' : 'false');
-    item.tabIndex = 0;
-
-    if (canSelectTracks) {
-      const selectLabel = document.createElement('label');
-      selectLabel.className = 'player-track-select';
-      selectLabel.title = `${track.title || track.fileName} 선택`;
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = isSelected;
-      checkbox.dataset.playerAction = 'select-track';
-      checkbox.dataset.trackId = track.id;
-      checkbox.setAttribute('aria-label', `${track.title || track.fileName} 선택`);
-      selectLabel.appendChild(checkbox);
-      item.appendChild(selectLabel);
-    }
-
-    const thumbnail = document.createElement('span');
-    thumbnail.className = 'player-track-thumbnail';
-    const thumbnailUrl = trackThumbnailUrl(track);
-    if (thumbnailUrl) {
-      const img = document.createElement('img');
-      img.src = thumbnailUrl;
-      img.alt = '';
-      thumbnail.appendChild(img);
-      thumbnail.classList.add('has-image');
-    } else {
-      thumbnail.textContent = '♪';
-    }
-
-    const info = document.createElement('span');
-    info.className = 'player-track-info';
-    const title = document.createElement('span');
-    title.className = 'player-track-title';
-    title.textContent = track.title;
-    const meta = document.createElement('span');
-    meta.className = 'player-track-meta';
-    meta.textContent = [metadataLine(track), track.fileName, formatBytes(track.size)].filter(Boolean).join(' · ');
-    info.append(title, meta);
-
-    const duration = document.createElement('span');
-    duration.className = 'player-track-duration';
-    duration.textContent = displayDuration(track)
-      ? formatTime(displayDuration(track))
-      : '';
-
-    const action = document.createElement('span');
-    action.className = 'player-track-action';
-    action.textContent = index === state.queuePosition ? '재생 중' : '대기';
-
-    const more = document.createElement('button');
-    more.type = 'button';
-    more.className = 'player-track-more';
-    more.dataset.playerAction = 'menu';
-    more.dataset.trackId = track.id;
-    more.title = '더보기';
-    more.setAttribute('aria-label', `${track.title || track.fileName} 더보기`);
-    more.setAttribute('aria-haspopup', 'menu');
-    more.setAttribute('aria-expanded', state.openMenuTrackId === track.id ? 'true' : 'false');
-    more.textContent = '⋮';
-
-    item.append(thumbnail, info, duration, action, more);
-    list.appendChild(item);
-  });
+  if (folderTree) {
+    renderedTracks = renderMusicFolderTree(list, folderTree, query, canSelectTracks, selectedIds);
+  } else {
+    renderTrackEntries(list, filteredTracks, canSelectTracks, selectedIds);
+  }
+  updateSelectionBar(canSelectTracks, renderedTracks);
+  purgeUnusedThumbnailUrls(new Set(renderedTracks.map(({ track }) => track.id)));
+  hydrateVisibleThumbnails(renderedTracks);
 }
 
 export function render() {
