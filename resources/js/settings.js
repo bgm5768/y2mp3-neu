@@ -25,6 +25,7 @@ const Settings = (() => {
     lastUpdateCheckAt: 0,
     lastUpdateInstallAt: 0,
     pendingUpdateVersion: '',
+    appliedUpdateVersion: '',
     playerVolume: 0.9,
     playerOrderMode: 'normal',
     playerRepeatMode: 'stop-current',

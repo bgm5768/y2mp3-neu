@@ -33,8 +33,24 @@ function isDevRuntime() {
   );
 }
 
-function currentVersion() {
+function runtimeVersion() {
   return window.NL_APPVERSION || '0.0.0';
+}
+
+function highestVersion(...versions) {
+  return versions
+    .map(normalizeVersion)
+    .filter(Boolean)
+    .sort(compareVersions)
+    .pop() || '0.0.0';
+}
+
+function currentVersion(settings = {}) {
+  return highestVersion(
+    runtimeVersion(),
+    settings.appliedUpdateVersion,
+    settings.pendingUpdateVersion
+  );
 }
 
 function latestReleaseApiUrl() {
@@ -94,10 +110,14 @@ export function createAppUpdater({ Neutralino, Settings, Toast }) {
   let renderStatus = () => {};
 
   function getState() {
+    const settings = Settings.get();
     return {
       ...state,
-      currentVersion: currentVersion(),
-      autoUpdateEnabled: Settings.get().autoUpdateEnabled !== false,
+      currentVersion: currentVersion(settings),
+      runtimeVersion: runtimeVersion(),
+      appliedUpdateVersion: settings.appliedUpdateVersion || '',
+      pendingUpdateVersion: settings.pendingUpdateVersion || '',
+      autoUpdateEnabled: settings.autoUpdateEnabled !== false,
       devRuntime: isDevRuntime()
     };
   }
@@ -153,7 +173,8 @@ export function createAppUpdater({ Neutralino, Settings, Toast }) {
 
     try {
       const latest = await fetchLatestRelease();
-      const hasUpdate = compareVersions(latest.version, currentVersion()) > 0;
+      const current = currentVersion(Settings.get());
+      const hasUpdate = compareVersions(latest.version, current) > 0;
 
       setStatus({
         checking: false,
@@ -225,6 +246,7 @@ export function createAppUpdater({ Neutralino, Settings, Toast }) {
       await downloadResources(checkResult.resourceAsset);
       await Settings.save({
         pendingUpdateVersion: checkResult.version,
+        appliedUpdateVersion: checkResult.version,
         lastUpdateInstallAt: Date.now()
       });
       setStatus({
@@ -256,8 +278,9 @@ export function createAppUpdater({ Neutralino, Settings, Toast }) {
       return getState();
     }
 
-    await Settings.save({ lastUpdateCheckAt: now });
     const result = await check({ manual });
+    if (result.error) return result;
+    await Settings.save({ lastUpdateCheckAt: Date.now() });
     if (!result.hasUpdate) {
       if (manual) Toast.show('현재 최신 버전입니다.', 'success', 4000);
       return result;
