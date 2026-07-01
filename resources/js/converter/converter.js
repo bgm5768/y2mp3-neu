@@ -31,12 +31,12 @@ export function createConverter({
     video: {
       label: '동영상',
       actionLabel: '다운로드',
-      allowedSources: ['youtube', 'tiktok', 'douyin', 'xiaohongshu'],
+      allowedSources: ['youtube', 'instagram', 'tiktok', 'douyin', 'xiaohongshu'],
       readyButton: '동영상 다운로드',
       multiButton: count => `${count}개 동영상 다운로드 시작`,
       runningButton: '동영상 다운로드 중…',
-      inputGuide: '다운로드할 YouTube, TikTok, Douyin, Xiaohongshu/Rednote 동영상 URL을 입력하세요. 여러 개는 줄바꿈으로 구분할 수 있습니다.',
-      placeholder: 'https://www.youtube.com/watch?v=...\nhttps://www.tiktok.com/@user/video/...\nhttps://www.douyin.com/video/...\nhttps://www.xiaohongshu.com/explore/...'
+      inputGuide: '다운로드할 YouTube, Instagram Reels, TikTok, Douyin, Xiaohongshu/Rednote 동영상 URL을 입력하세요. 여러 개는 줄바꿈으로 구분할 수 있습니다.',
+      placeholder: 'https://www.youtube.com/watch?v=...\nhttps://www.instagram.com/reel/...\nhttps://www.tiktok.com/@user/video/...\nhttps://www.douyin.com/video/...\nhttps://www.xiaohongshu.com/explore/...'
     }
   };
 
@@ -48,7 +48,7 @@ export function createConverter({
 
   function supportedSourceText(mode) {
     return mode === 'video'
-      ? 'YouTube, TikTok, Douyin, Xiaohongshu/Rednote'
+      ? 'YouTube, Instagram Reels, TikTok, Douyin, Xiaohongshu/Rednote'
       : 'YouTube, Instagram, TikTok';
   }
 

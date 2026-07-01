@@ -22,6 +22,12 @@ const YTDlp = (() => {
 
   const _cache = { ytdlp: null, ffmpeg: null, deps: null, depsAt: 0 };
   const autoCookieCache = {};
+  const YTDLP_STABLE_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+  const YTDLP_NIGHTLY_URL = 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe';
+  const YTDLP_CHANNELS = {
+    stable: { url: YTDLP_STABLE_URL, label: 'yt-dlp' },
+    nightly: { url: YTDLP_NIGHTLY_URL, label: 'yt-dlp nightly' }
+  };
 
   // ────────────────────────────────────────────────────────────────
   //  안전한 execCommand 래퍼
@@ -180,13 +186,29 @@ const YTDlp = (() => {
     return Date.now() - date.getTime() > maxAgeDays * 24 * 60 * 60 * 1000;
   }
 
+  function isYtdlpNightlyVersion(version) {
+    return /^\d{4}\.\d{2}\.\d{2}\.\d{6}/.test(String(version || ''));
+  }
+
   async function ensureFreshYtdlpForSource(source, onProgress) {
-    if (source !== 'douyin') return;
+    if (!['douyin', 'instagram'].includes(source)) return;
 
     const deps = await checkDeps();
+    if (source === 'instagram' && (!deps.ytdlp.ok || !isYtdlpNightlyVersion(deps.ytdlp.version))) {
+      onProgress && onProgress(2, '', 'Instagram Reels 지원용 yt-dlp nightly 설치 중', 'download');
+      await installYtdlp(progress => {
+        if (!progress || typeof progress !== 'object') return;
+        if (progress.message) {
+          onProgress && onProgress(Math.max(2, Math.min(8, Number(progress.pct) || 2)), '', progress.message, 'download');
+        }
+      }, { channel: 'nightly' });
+      return;
+    }
+
     if (!deps.ytdlp.ok || !isYtdlpOlderThan(deps.ytdlp.version, 30)) return;
 
-    onProgress && onProgress(2, '', 'Douyin 지원 업데이트 확인 중', 'download');
+    const label = source === 'instagram' ? 'Instagram Reels' : 'Douyin';
+    onProgress && onProgress(2, '', `${label} 지원 업데이트 확인 중`, 'download');
     await installYtdlp(progress => {
       if (!progress || typeof progress !== 'object') return;
       if (progress.message) {
@@ -825,6 +847,15 @@ const YTDlp = (() => {
     ];
   }
 
+  function instagramRequestArgs({ source }) {
+    if (source !== 'instagram') return [];
+    return [
+      '--referer "https://www.instagram.com/"',
+      '--user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"',
+      '--add-header "Accept-Language: ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"'
+    ];
+  }
+
   function videoCookieArgs({ source, cookieBrowser, cookieFile }) {
     if (source !== 'douyin') return [];
 
@@ -841,6 +872,11 @@ const YTDlp = (() => {
 
   function isDouyinCookieError(source, text) {
     return source === 'douyin' && /fresh cookies|cookies?.*needed|login/i.test(String(text || ''));
+  }
+
+  function isInstagramAccessError(source, text) {
+    return source === 'instagram' &&
+      /login required|login_required|private|not available|requested content is not available|cookies?.*needed|checkpoint/i.test(String(text || ''));
   }
 
   function isDouyinEmptyWebDetailError(source, text) {
@@ -879,6 +915,10 @@ const YTDlp = (() => {
 
   function douyinCookieErrorMessage() {
     return 'Douyin이 받은 쿠키를 최신 세션으로 인정하지 않았습니다. Firefox에서 Douyin 페이지를 한 번 연 뒤 다시 시도하세요.';
+  }
+
+  function instagramAccessErrorMessage() {
+    return 'Instagram Reels 다운로드는 공개 릴스 URL만 지원합니다. 비공개 계정, 로그인/연령 확인이 필요한 릴스, 삭제된 릴스는 다운로드할 수 없습니다.';
   }
 
   async function douyinDownloadErrorMessage({ source, errorText, cookieFile }) {
@@ -1366,6 +1406,7 @@ const YTDlp = (() => {
 
     args.push(...videoCookieArgs({ source, cookieBrowser, cookieFile: resolvedCookieFile }));
     args.push(...douyinRequestArgs({ source, rawUrl }));
+    args.push(...instagramRequestArgs({ source }));
 
     if (proxy) args.push(`--proxy "${proxy}"`);
     if (rateLimit) args.push(`-r ${rateLimit}`);
@@ -1489,6 +1530,9 @@ const YTDlp = (() => {
             errorText,
             cookieFile: resolvedCookieFile
           }));
+        }
+        if (isInstagramAccessError(source, errorText)) {
+          throw new Error(instagramAccessErrorMessage());
         }
         throw new Error(errLine || `yt-dlp 오류 (종료 코드: ${r.exitCode})`);
       }
@@ -1753,14 +1797,17 @@ const YTDlp = (() => {
     return dest;
   }
 
-  async function installYtdlp(onMessage = () => {}) {
-    const url  = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+  async function installYtdlp(onMessage = () => {}, options = {}) {
+    const channelName = options.channel === 'nightly' ? 'nightly' : 'stable';
+    const channel = YTDLP_CHANNELS[channelName];
+    const url = channel.url;
+    const label = channel.label;
     const dest = await ytdlpInstallPath();
 
-    notifyInstall(onMessage, { phase: 'prepare', pct: 0, message: 'yt-dlp 다운로드 준비 중…' });
+    notifyInstall(onMessage, { phase: 'prepare', pct: 0, message: `${label} 다운로드 준비 중…` });
     try {
-      await downloadFileWithProgress(url, dest, 'yt-dlp', onMessage, 5, 88);
-      notifyInstall(onMessage, { phase: 'verify', pct: 92, message: 'yt-dlp 실행 확인 중' });
+      await downloadFileWithProgress(url, dest, label, onMessage, 5, 88);
+      notifyInstall(onMessage, { phase: 'verify', pct: 92, message: `${label} 실행 확인 중` });
 
       _cache.ytdlp = null;
       _cache.deps = null;
@@ -1771,10 +1818,10 @@ const YTDlp = (() => {
         throw new Error('설치 후 yt-dlp 실행 확인에 실패했습니다.');
       }
 
-      notifyInstall(onMessage, { phase: 'done', pct: 100, message: `yt-dlp ${deps.ytdlp.version} 설치 완료` });
+      notifyInstall(onMessage, { phase: 'done', pct: 100, message: `${label} ${deps.ytdlp.version} 설치 완료` });
       return deps;
     } catch (e) {
-      notifyInstall(onMessage, { phase: 'error', pct: 100, message: `yt-dlp 설치 실패: ${e.message || e}` });
+      notifyInstall(onMessage, { phase: 'error', pct: 100, message: `${label} 설치 실패: ${e.message || e}` });
       throw e;
     }
   }

@@ -1,6 +1,6 @@
 {
   "applicationId": "js.neutralino.yt-mp3-converter",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "defaultMode": "window",
   "port": 0,
   "documentRoot": "/resources/",
