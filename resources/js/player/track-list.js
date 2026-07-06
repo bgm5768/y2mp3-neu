@@ -23,16 +23,19 @@ export function createTrackList({ state, Neutralino, playlistSourceTracks, displ
       return entryName;
     }
 
-    if (directPath && audioExts.test(directPath)) {
-      return isAbsolutePath(directPath) ? directPath : joinPath(root, directPath);
-    }
-
     if (directPath && isAbsolutePath(directPath)) {
+      if (audioExts.test(directPath) || fileName(directPath).toLowerCase() === String(entryName).toLowerCase()) {
+        return directPath;
+      }
       return joinPath(directPath, entryName);
     }
 
     if (directPath) {
-      return joinPath(root, directPath.endsWith(entryName) ? directPath : joinPath(directPath, entryName));
+      const normalizedEntryName = String(entryName).toLowerCase();
+      const directIncludesEntry = fileName(directPath).toLowerCase() === normalizedEntryName;
+      return joinPath(root, directIncludesEntry || audioExts.test(directPath)
+        ? directPath
+        : joinPath(directPath, entryName));
     }
 
     return joinPath(root, entryName);
@@ -50,6 +53,10 @@ export function createTrackList({ state, Neutralino, playlistSourceTracks, displ
 
   function fileName(path) {
     return String(path || '').split(/[\\/]/).pop() || '';
+  }
+
+  function normalizeTrackId(path) {
+    return String(path || '').replace(/\\/g, '/').toLowerCase();
   }
 
   function trackTitle(path) {
@@ -157,8 +164,9 @@ export function createTrackList({ state, Neutralino, playlistSourceTracks, displ
 
   function rebuildQueue(preserveTrackId = currentTrack()?.id || '') {
     state.queue = sortTracks(playlistSourceTracks());
+    const targetId = normalizeTrackId(preserveTrackId);
     state.queuePosition = preserveTrackId
-      ? state.queue.findIndex(track => track.id === preserveTrackId)
+      ? state.queue.findIndex(track => normalizeTrackId(track.id) === targetId)
       : (state.queue.length ? 0 : -1);
     if (state.queuePosition < 0 && state.queue.length) state.queuePosition = 0;
   }
@@ -190,25 +198,64 @@ export function createTrackList({ state, Neutralino, playlistSourceTracks, displ
   }
 
   function queueIndexByTrackId(trackId) {
-    return state.queue.findIndex(track => track.id === trackId);
+    const targetId = normalizeTrackId(trackId);
+    return state.queue.findIndex(track => normalizeTrackId(track.id) === targetId);
   }
 
   async function scanAudioFiles(savePath) {
-    let entries = await Neutralino.filesystem.readDirectory(savePath, { recursive: true });
-    if (!Array.isArray(entries) || entries.length === 0) {
-      entries = await Neutralino.filesystem.readDirectory(savePath);
+    const byPath = new Map();
+    const addFile = (entry, basePath = savePath) => {
+      if (!isAudioEntry(entry)) return;
+      const path = resolveEntryPath(basePath, entry);
+      const key = normalizeTrackId(path);
+      if (!key || byPath.has(key)) return;
+      byPath.set(key, { ...entry, path });
+    };
+
+    try {
+      const entries = await Neutralino.filesystem.readDirectory(savePath, { recursive: true });
+      if (Array.isArray(entries)) {
+        entries.forEach(entry => {
+          const entryType = String(entry.type || '').toUpperCase();
+          if ((!entryType || entryType === 'FILE') && isAudioEntry(entry)) addFile(entry, savePath);
+        });
+      }
+    } catch {
+      // Some Neutralino runtimes do not support recursive reads consistently.
     }
 
-    const files = entries.filter(entry => {
-      const entryType = String(entry.type || '').toUpperCase();
-      return (!entryType || entryType === 'FILE') && isAudioEntry(entry);
-    });
+    const visitedDirs = new Set();
+    async function visitDirectory(dir, isRoot = false) {
+      const key = String(dir || '').replace(/\//g, '\\').toLowerCase();
+      if (!key || visitedDirs.has(key)) return;
+      visitedDirs.add(key);
 
-    const tracks = files.map(entry => {
-      const path = resolveEntryPath(savePath, entry);
+      let entries = [];
+      try {
+        entries = await Neutralino.filesystem.readDirectory(dir);
+      } catch (error) {
+        if (isRoot) throw error;
+        return;
+      }
+
+      for (const entry of entries || []) {
+        const entryType = String(entry.type || '').toUpperCase();
+        const path = resolveEntryPath(dir, entry);
+        if ((!entryType || entryType === 'FILE') && isAudioEntry({ ...entry, path })) {
+          addFile({ ...entry, path }, dir);
+        } else if (entryType === 'DIRECTORY' || entryType === 'DIR') {
+          await visitDirectory(path);
+        }
+      }
+    }
+
+    await visitDirectory(savePath, true);
+
+    const tracks = [...byPath.values()].map(entry => {
+      const path = entry.path || resolveEntryPath(savePath, entry);
       const ext = fileName(path).split('.').pop()?.toLowerCase() || '';
       return {
-        id: path.toLowerCase(),
+        id: normalizeTrackId(path),
         path,
         fileName: fileName(path),
         title: trackTitle(path),
@@ -239,6 +286,7 @@ export function createTrackList({ state, Neutralino, playlistSourceTracks, displ
     isAudioEntry,
     fileTime,
     fileName,
+    normalizeTrackId,
     trackTitle,
     directoryName,
     fileExtension,

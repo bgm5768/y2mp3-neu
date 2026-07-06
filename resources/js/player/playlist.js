@@ -84,6 +84,10 @@ function normalizePathKey(path) {
   return String(path || '').replace(/\//g, '\\').toLocaleLowerCase();
 }
 
+function normalizeTrackId(trackId) {
+  return String(trackId || '').replace(/\\/g, '/').toLocaleLowerCase();
+}
+
 function samePath(a, b) {
   return normalizePathKey(a) === normalizePathKey(b);
 }
@@ -105,6 +109,43 @@ function requireAudioRootPath() {
 
 function playlistFolderPath(playlist) {
   return joinPath(requireAudioRootPath(), normalizePlaylistName(playlist?.name));
+}
+
+function playlistNameKey(name) {
+  return normalizePlaylistName(name).toLocaleLowerCase();
+}
+
+function isDirectoryEntry(entry) {
+  const type = String(entry?.type || '').toUpperCase();
+  return type === 'DIRECTORY' || type === 'DIR';
+}
+
+function playlistFolderNameFromEntry(entry) {
+  return normalizePlaylistName(entry?.entry || fileName(entry?.path || ''));
+}
+
+async function directRootPlaylistFolderNames() {
+  if (!Neutralino?.filesystem?.readDirectory) return [];
+
+  const root = requireAudioRootPath();
+  let entries = [];
+  try {
+    entries = await Neutralino.filesystem.readDirectory(root);
+  } catch {
+    return [];
+  }
+
+  const seen = new Set();
+  const folders = [];
+  (entries || []).forEach(entry => {
+    if (!isDirectoryEntry(entry)) return;
+    const name = playlistFolderNameFromEntry(entry);
+    const key = playlistNameKey(name);
+    if (!name || key === playlistNameKey('내 음악') || seen.has(key)) return;
+    seen.add(key);
+    folders.push(name);
+  });
+  return folders;
 }
 
 async function ensureDirectory(path) {
@@ -153,14 +194,15 @@ async function uniqueDestinationPath(targetDir, preferredName, currentPath = '')
 }
 
 function idMatches(a, b) {
-  return String(a || '').toLocaleLowerCase() === String(b || '').toLocaleLowerCase();
+  return normalizeTrackId(a) === normalizeTrackId(b);
 }
 
 function updateSelectedTrackId(oldId, nextId) {
   if (!(state.selectedTrackIds instanceof Set) || idMatches(oldId, nextId)) return;
-  if (state.selectedTrackIds.has(oldId)) {
-    state.selectedTrackIds.delete(oldId);
-    state.selectedTrackIds.add(nextId);
+  const currentValue = [...state.selectedTrackIds].find(trackId => idMatches(trackId, oldId));
+  if (currentValue) {
+    state.selectedTrackIds.delete(currentValue);
+    state.selectedTrackIds.add(normalizeTrackId(nextId));
   }
 }
 
@@ -186,7 +228,7 @@ function replaceTrackIdInPlaylists(oldId, nextId) {
     const trackIds = playlist.trackIds
       .map(trackId => idMatches(trackId, oldId) ? nextId : trackId)
       .filter(trackId => {
-        const key = String(trackId || '').toLocaleLowerCase();
+        const key = normalizeTrackId(trackId);
         if (!key || seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -196,7 +238,7 @@ function replaceTrackIdInPlaylists(oldId, nextId) {
 }
 
 function updateTrackPathInState(oldId, nextPath) {
-  const nextId = String(nextPath || '').toLocaleLowerCase();
+  const nextId = normalizeTrackId(nextPath);
   const nextFileName = fileName(nextPath);
   const nextExt = nextFileName.split('.').pop()?.toLocaleLowerCase() || '';
   const seenTracks = new Set();
@@ -253,10 +295,10 @@ function trackIdsFromMoveResults(results) {
   const seen = new Set();
   results.forEach(result => {
     [result.oldId, result.nextId].forEach(trackId => {
-      const key = String(trackId || '').toLocaleLowerCase();
+      const key = normalizeTrackId(trackId);
       if (!key || seen.has(key)) return;
       seen.add(key);
-      ids.push(trackId);
+      ids.push(key);
     });
   });
   return ids;
@@ -264,27 +306,29 @@ function trackIdsFromMoveResults(results) {
 
 function uniqueTrackIds(trackIds) {
   const seen = new Set();
-  return trackIds.filter(trackId => {
-    const key = String(trackId || '').toLocaleLowerCase();
-    if (!key || seen.has(key)) return false;
+  const result = [];
+  trackIds.forEach(trackId => {
+    const key = normalizeTrackId(trackId);
+    if (!key || seen.has(key)) return;
     seen.add(key);
-    return true;
+    result.push(key);
   });
+  return result;
 }
 
 function removeTrackIdsFromAllPlaylists(trackIds) {
-  const removing = new Set(trackIds.map(trackId => String(trackId || '').toLocaleLowerCase()));
+  const removing = new Set(trackIds.map(normalizeTrackId));
   state.playlists = state.playlists.map(playlist => ({
     ...playlist,
-    trackIds: playlist.trackIds.filter(trackId => !removing.has(String(trackId || '').toLocaleLowerCase()))
+    trackIds: playlist.trackIds.filter(trackId => !removing.has(normalizeTrackId(trackId)))
   }));
 }
 
 function assignTrackIdsToPlaylist(playlistId, trackIds, movedTrackIds = trackIds) {
-  const removing = new Set(movedTrackIds.map(trackId => String(trackId || '').toLocaleLowerCase()));
+  const removing = new Set(movedTrackIds.map(normalizeTrackId));
   const adding = uniqueTrackIds(trackIds);
   state.playlists = state.playlists.map(playlist => {
-    const baseIds = playlist.trackIds.filter(trackId => !removing.has(String(trackId || '').toLocaleLowerCase()));
+    const baseIds = playlist.trackIds.filter(trackId => !removing.has(normalizeTrackId(trackId)));
     if (playlist.id !== playlistId) return { ...playlist, trackIds: baseIds };
     return { ...playlist, trackIds: uniqueTrackIds([...baseIds, ...adding]) };
   });
@@ -312,8 +356,8 @@ function anyTrackIsCurrent(tracks) {
 function playlistHadAnyTrack(playlistId, trackIds) {
   const playlist = state.playlists.find(item => item.id === playlistId);
   if (!playlist) return false;
-  const ids = new Set(trackIds.map(trackId => String(trackId || '').toLocaleLowerCase()));
-  return playlist.trackIds.some(trackId => ids.has(String(trackId || '').toLocaleLowerCase()));
+  const ids = new Set(trackIds.map(normalizeTrackId));
+  return playlist.trackIds.some(trackId => ids.has(normalizeTrackId(trackId)));
 }
 
 function isPathInsideDirectory(path, dir) {
@@ -375,7 +419,7 @@ export function sanitizePlaylists(value) {
       const name = normalizePlaylistName(playlist?.name);
       const id = String(playlist?.id || '').trim() || createPlaylistId();
       const trackIds = Array.isArray(playlist?.trackIds)
-        ? [...new Set(playlist.trackIds.map(trackId => String(trackId || '').toLowerCase()).filter(Boolean))]
+        ? uniqueTrackIds(playlist.trackIds)
         : [];
       return { id, name, trackIds };
     })
@@ -400,8 +444,8 @@ export function activePlaylistName() {
 export function playlistSourceTracks() {
   const playlist = activePlaylist();
   if (!playlist) return state.tracks;
-  const ids = new Set(playlist.trackIds);
-  return state.tracks.filter(track => ids.has(track.id));
+  const ids = new Set(playlist.trackIds.map(normalizeTrackId));
+  return state.tracks.filter(track => ids.has(normalizeTrackId(track.id)));
 }
 
 export function savePlaylists(extraPatch = {}) {
@@ -412,11 +456,57 @@ export function savePlaylists(extraPatch = {}) {
   }, { immediate: true });
 }
 
+export async function reconcilePlaylistsWithFolders() {
+  let changed = false;
+  const existingNames = new Set(state.playlists.map(playlist => playlistNameKey(playlist.name)));
+  const folderNames = await directRootPlaylistFolderNames();
+
+  folderNames.forEach(name => {
+    const key = playlistNameKey(name);
+    if (!key || existingNames.has(key)) return;
+
+    const validation = validatePlaylistName(name);
+    if (typeof validation === 'string') return;
+
+    state.playlists = [...state.playlists, {
+      id: createPlaylistId(),
+      name: validation.value,
+      trackIds: []
+    }];
+    existingNames.add(key);
+    changed = true;
+  });
+
+  state.playlists = state.playlists.map(playlist => {
+    let folderPath = '';
+    try {
+      folderPath = playlistFolderPath(playlist);
+    } catch {
+      return playlist;
+    }
+
+    const folderTrackIds = state.tracks
+      .filter(track => isPathInsideDirectory(track.path, folderPath))
+      .map(track => track.id);
+
+    if (!folderTrackIds.length) return playlist;
+
+    const nextTrackIds = uniqueTrackIds([...playlist.trackIds, ...folderTrackIds]);
+    if (nextTrackIds.length === playlist.trackIds.length) return playlist;
+
+    changed = true;
+    return { ...playlist, trackIds: nextTrackIds };
+  });
+
+  if (changed) savePlaylists();
+  return changed;
+}
+
 export function trimMissingPlaylistTracks() {
-  const existing = new Set(state.tracks.map(track => track.id));
+  const existing = new Set(state.tracks.map(track => normalizeTrackId(track.id)));
   let changed = false;
   state.playlists = state.playlists.map(playlist => {
-    const nextTrackIds = playlist.trackIds.filter(trackId => existing.has(trackId));
+    const nextTrackIds = uniqueTrackIds(playlist.trackIds).filter(trackId => existing.has(normalizeTrackId(trackId)));
     if (nextTrackIds.length !== playlist.trackIds.length) changed = true;
     return changed ? { ...playlist, trackIds: nextTrackIds } : playlist;
   });
@@ -792,14 +882,15 @@ export async function createPlaylist() {
   }
 }
 function tracksByIds(trackIds) {
-  const trackMap = new Map([...state.tracks, ...state.queue].map(track => [track.id, track]));
+  const trackMap = new Map([...state.tracks, ...state.queue].map(track => [normalizeTrackId(track.id), track]));
   const ids = Array.isArray(trackIds) ? trackIds : [trackIds];
   const seen = new Set();
   return ids
-    .map(trackId => trackMap.get(trackId))
+    .map(trackId => trackMap.get(normalizeTrackId(trackId)))
     .filter(track => {
-      if (!track || seen.has(track.id)) return false;
-      seen.add(track.id);
+      const key = normalizeTrackId(track?.id);
+      if (!track || seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
 }
@@ -813,8 +904,8 @@ function selectedTracksDetail(tracks) {
 }
 
 function playlistAddableTrackIds(playlist, tracks) {
-  const existing = new Set(playlist.trackIds);
-  return tracks.map(track => track.id).filter(trackId => !existing.has(trackId));
+  const existing = new Set(playlist.trackIds.map(normalizeTrackId));
+  return tracks.map(track => normalizeTrackId(track.id)).filter(trackId => !existing.has(normalizeTrackId(trackId)));
 }
 
 export async function addKnownTrackIdsToPlaylist(trackIds, playlistId, { silent = false } = {}) {

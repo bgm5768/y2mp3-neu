@@ -23,6 +23,7 @@ import {
   activePlaylistName,
   playlistSourceTracks,
   savePlaylists,
+  reconcilePlaylistsWithFolders,
   trimMissingPlaylistTracks,
   closePlaylistMenu,
   togglePlaylistMenu,
@@ -48,6 +49,7 @@ let Toast = { show() {} };
 let joinPath = null;
 let fileTime = null;
 let fileName = null;
+let normalizeTrackId = null;
 let trackTitle = null;
 let directoryName = null;
 let normalizeRenameFileName = null;
@@ -139,9 +141,9 @@ function displayDuration(track = currentTrack()) {
   if (streamDuration > 0) return streamDuration;
   const settings = Settings.get();
   const savedDuration = Number(settings.playerLastDuration) || 0;
-  const savedId = String(settings.playerLastTrackId || '').toLowerCase();
-  const savedPath = String(settings.playerLastTrackPath || '').toLowerCase();
-  if (track && savedDuration > 0 && (track.id === savedId || track.path.toLowerCase() === savedPath)) {
+  const savedId = normalizeTrackPathKey(settings.playerLastTrackId);
+  const savedPath = normalizeTrackPathKey(settings.playerLastTrackPath);
+  if (track && savedDuration > 0 && (normalizeTrackPathKey(track.id) === savedId || normalizeTrackPathKey(track.path) === savedPath)) {
     return savedDuration;
   }
   const current = currentTrack();
@@ -332,7 +334,9 @@ function toggleMusicFolder(folderPath, currentlyExpanded = false) {
 }
 
 function normalizeTrackPathKey(path) {
-  return String(path || '').replace(/\//g, '\\').toLowerCase();
+  return typeof normalizeTrackId === 'function'
+    ? normalizeTrackId(path)
+    : String(path || '').replace(/\\/g, '/').toLowerCase();
 }
 
 async function addSelectedTracksToPlaylist() {
@@ -356,8 +360,8 @@ async function autoplayAddedTrackIfIdle(result, { requirePlayerTab = false } = {
   if (audio && !audio.paused) return;
   if (!result.wasQueueEmpty && result.wasTrackSelected && audio?.src) return;
 
-  const addedIds = new Set(result.addedTrackIds);
-  const index = state.queue.findIndex(track => addedIds.has(track.id));
+  const addedIds = new Set(result.addedTrackIds.map(normalizeTrackPathKey));
+  const index = state.queue.findIndex(track => addedIds.has(normalizeTrackPathKey(track.id)));
   if (index < 0) return;
 
   await loadTrack(index, true, { restorePosition: 0 });
@@ -396,13 +400,14 @@ async function addFilesToPlaylist(filePaths, playlistId) {
 }
 
 function tracksByIds(trackIds) {
-  const trackMap = new Map([...state.tracks, ...state.queue].map(track => [track.id, track]));
+  const trackMap = new Map([...state.tracks, ...state.queue].map(track => [normalizeTrackPathKey(track.id), track]));
   const seen = new Set();
   return trackIds
-    .map(trackId => trackMap.get(trackId))
+    .map(trackId => trackMap.get(normalizeTrackPathKey(trackId)))
     .filter(track => {
-      if (!track || seen.has(track.id)) return false;
-      seen.add(track.id);
+      const key = normalizeTrackPathKey(track?.id);
+      if (!track || seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
 }
@@ -431,7 +436,7 @@ async function confirmRemoveTracks(tracks) {
 }
 
 function removeDeletedTracksFromState(deletedIds, preserveId = '') {
-  const deletedSet = new Set(deletedIds);
+  const deletedSet = new Set(deletedIds.map(normalizeTrackPathKey));
   deletedSet.forEach(trackId => {
     state.metadataPromises.delete(trackId);
     state.streamInfoPromises.delete(trackId);
@@ -443,15 +448,17 @@ function removeDeletedTracksFromState(deletedIds, preserveId = '') {
 
   state.playlists = state.playlists.map(playlist => ({
     ...playlist,
-    trackIds: playlist.trackIds.filter(trackId => !deletedSet.has(trackId))
+    trackIds: playlist.trackIds.filter(trackId => !deletedSet.has(normalizeTrackPathKey(trackId)))
   }));
-  state.tracks = state.tracks.filter(item => !deletedSet.has(item.id));
+  state.tracks = state.tracks.filter(item => !deletedSet.has(normalizeTrackPathKey(item.id)));
   state.queue = sortTracks(playlistSourceTracks());
   state.queuePosition = preserveId
-    ? state.queue.findIndex(item => item.id === preserveId)
+    ? state.queue.findIndex(item => normalizeTrackPathKey(item.id) === normalizeTrackPathKey(preserveId))
     : -1;
   if (state.queuePosition < 0 && preserveId && state.queue.length) state.queuePosition = 0;
-  deletedSet.forEach(trackId => selectedTrackIds().delete(trackId));
+  [...selectedTrackIds()].forEach(trackId => {
+    if (deletedSet.has(normalizeTrackPathKey(trackId))) selectedTrackIds().delete(trackId);
+  });
 }
 
 async function removeSelectedTrackFiles() {
@@ -461,7 +468,7 @@ async function removeSelectedTrackFiles() {
 
   const audio = el('audio-player');
   const current = currentTrack();
-  const deletingCurrent = tracks.some(track => track.id === current?.id);
+  const deletingCurrent = tracks.some(track => normalizeTrackPathKey(track.id) === normalizeTrackPathKey(current?.id));
   const preserveId = deletingCurrent ? '' : current?.id || '';
   const deletedIds = [];
   const failures = [];
@@ -483,7 +490,7 @@ async function removeSelectedTrackFiles() {
 
     if (deletedIds.length) {
       removeDeletedTracksFromState(deletedIds, preserveId);
-      if (deletingCurrent && deletedIds.includes(current?.id)) {
+      if (deletingCurrent && deletedIds.some(trackId => normalizeTrackPathKey(trackId) === normalizeTrackPathKey(current?.id))) {
         savePlayerSettings({
           playerLastTrackId: '',
           playerLastTrackPath: '',
@@ -498,7 +505,7 @@ async function removeSelectedTrackFiles() {
 
     if (failures.length) {
       Toast.show(`${deletedIds.length}곡 삭제, ${failures.length}곡 실패했습니다.`, 'error', 7000);
-      if (deletingCurrent && failures.some(({ track }) => track.id === current?.id)) {
+      if (deletingCurrent && failures.some(({ track }) => normalizeTrackPathKey(track.id) === normalizeTrackPathKey(current?.id))) {
         void loadLibrary({ force: true });
       }
       renderList();
@@ -513,13 +520,13 @@ async function removeSelectedTrackFiles() {
 }
 
 function updateTrackPath(oldId, nextPath, oldTitle) {
-  const nextId = nextPath.toLowerCase();
+  const nextId = normalizeTrackPathKey(nextPath);
   const nextFileName = fileName(nextPath);
   const nextExt = nextFileName.split('.').pop()?.toLowerCase() || '';
   const seen = new Set();
 
   [...state.tracks, ...state.queue].forEach(track => {
-    if (!track || track.id !== oldId || seen.has(track)) return;
+    if (!track || normalizeTrackPathKey(track.id) !== normalizeTrackPathKey(oldId) || seen.has(track)) return;
     seen.add(track);
     const usesFileTitle = !track.metadataLoaded || !track.title || track.title === oldTitle;
     track.id = nextId;
@@ -533,10 +540,10 @@ function updateTrackPath(oldId, nextPath, oldTitle) {
   state.streamInfoPromises.delete(oldId);
   state.playlists = state.playlists.map(playlist => ({
     ...playlist,
-    trackIds: playlist.trackIds.map(trackId => trackId === oldId ? nextId : trackId)
+    trackIds: playlist.trackIds.map(trackId => normalizeTrackPathKey(trackId) === normalizeTrackPathKey(oldId) ? nextId : normalizeTrackPathKey(trackId))
   }));
   savePlaylists();
-  rebuildQueue(currentTrack()?.id === oldId ? nextId : currentTrack()?.id || nextId);
+  rebuildQueue(normalizeTrackPathKey(currentTrack()?.id) === normalizeTrackPathKey(oldId) ? nextId : currentTrack()?.id || nextId);
   return nextId;
 }
 
@@ -583,7 +590,7 @@ async function renameTrackFile(trackId) {
   const current = currentTrack();
   const oldId = track.id;
   const oldTitle = trackTitle(track.path);
-  const wasCurrent = current?.id === oldId;
+  const wasCurrent = normalizeTrackPathKey(current?.id) === normalizeTrackPathKey(oldId);
   const wasPlaying = !!(wasCurrent && audio && !audio.paused);
   const position = wasCurrent ? Math.floor(displayCurrentTime()) : 0;
 
@@ -624,7 +631,7 @@ async function removeTrackFile(trackId) {
 
   const audio = el('audio-player');
   const current = currentTrack();
-  const wasCurrent = current?.id === track.id;
+  const wasCurrent = normalizeTrackPathKey(current?.id) === normalizeTrackPathKey(track.id);
   const preserveId = wasCurrent ? '' : current?.id || '';
 
   try {
@@ -635,12 +642,12 @@ async function removeTrackFile(trackId) {
     state.streamInfoPromises.delete(track.id);
     state.playlists = state.playlists.map(playlist => ({
       ...playlist,
-      trackIds: playlist.trackIds.filter(trackId => trackId !== track.id)
+      trackIds: playlist.trackIds.filter(trackId => normalizeTrackPathKey(trackId) !== normalizeTrackPathKey(track.id))
     }));
-    state.tracks = state.tracks.filter(item => item.id !== track.id);
+    state.tracks = state.tracks.filter(item => normalizeTrackPathKey(item.id) !== normalizeTrackPathKey(track.id));
     state.queue = sortTracks(playlistSourceTracks());
     state.queuePosition = preserveId
-      ? state.queue.findIndex(item => item.id === preserveId)
+      ? state.queue.findIndex(item => normalizeTrackPathKey(item.id) === normalizeTrackPathKey(preserveId))
       : -1;
     if (state.queuePosition < 0 && preserveId && state.queue.length) state.queuePosition = 0;
 
@@ -674,11 +681,14 @@ async function restoreLastTrackIfNeeded() {
   if (state.restoredLastTrack || !state.queue.length || state.sourceTrackId) return false;
 
   const settings = Settings.get();
-  const savedId = String(settings.playerLastTrackId || '').toLowerCase();
-  const savedPath = String(settings.playerLastTrackPath || '').toLowerCase();
+  const savedId = normalizeTrackPathKey(settings.playerLastTrackId);
+  const savedPath = normalizeTrackPathKey(settings.playerLastTrackPath);
   if (!savedId && !savedPath) return false;
 
-  const index = state.queue.findIndex(track => track.id === savedId || track.path.toLowerCase() === savedPath);
+  const index = state.queue.findIndex(track =>
+    normalizeTrackPathKey(track.id) === savedId ||
+    normalizeTrackPathKey(track.path) === savedPath
+  );
   if (index < 0) return false;
 
   state.restoredLastTrack = true;
@@ -769,6 +779,7 @@ async function loadLibrary({ force = false } = {}) {
     }
     state.tracks = mergeKnownTrackData(tracks);
     state.loadedPath = loadedPath;
+    await reconcilePlaylistsWithFolders();
     trimMissingPlaylistTracks();
     rebuildQueue(currentId);
     render();
@@ -1331,6 +1342,7 @@ export function createPlayer(dependencies = {}) {
     joinPath,
     fileTime,
     fileName,
+    normalizeTrackId,
     trackTitle,
     directoryName,
     normalizeRenameFileName,
