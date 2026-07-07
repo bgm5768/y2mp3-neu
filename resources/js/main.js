@@ -7,7 +7,7 @@
 
 let Player = null;
 
-function initTabs({ Toast, DependencyUI, getPlayer }) {
+function initTabs({ Toast, DependencyUI, getPlayer, ApiDocs }) {
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') {
@@ -21,6 +21,8 @@ function initTabs({ Toast, DependencyUI, getPlayer }) {
       document.getElementById(`tab-${tab}`).classList.add('active');
       if (tab === 'player') {
         void getPlayer()?.loadLibrary({ force: true });
+      } else if (tab === 'api') {
+        ApiDocs?.renderSnippets?.();
       }
     });
   });
@@ -33,6 +35,7 @@ async function loadModules() {
     { createAppUpdater },
     { Toast },
     { createDependencyUi },
+    { createApiDocs },
     { createQueueUi },
     { createConverter },
     { createPlayer },
@@ -43,6 +46,7 @@ async function loadModules() {
     import('./core/app-updater.js'),
     import('./ui/toast.js'),
     import('./ui/dependency-ui.js'),
+    import('./ui/api-docs.js'),
     import('./converter/queue-ui.js'),
     import('./converter/converter.js'),
     import('./player/player.js'),
@@ -68,12 +72,14 @@ async function loadModules() {
     DependencyUI,
     getPlayer
   });
+  window.YtMp3ConversionApi = Converter.api;
+  const ApiDocs = createApiDocs({ Settings, Neutralino, Toast });
   const SettingsUI = createSettingsUi({ Settings, Neutralino, YTDlp, Toast, DependencyUI, AppUpdater, getPlayer });
 
   DependencyUI.setGateChangeHandler(Converter.updateConvertButton);
   installWindowGuard(Neutralino);
 
-  return { Toast, DependencyUI, Converter, SettingsUI, AppUpdater, getPlayer };
+  return { Toast, DependencyUI, Converter, ApiDocs, SettingsUI, AppUpdater, getPlayer };
 }
 
 Neutralino.init();
@@ -89,7 +95,7 @@ Neutralino.events.on('windowClose', () => Neutralino.app.exit());
     return;
   }
 
-  const { Toast, DependencyUI, Converter, SettingsUI, AppUpdater, getPlayer } = modules;
+  const { Toast, DependencyUI, Converter, ApiDocs, SettingsUI, AppUpdater, getPlayer } = modules;
 
   try {
     DependencyUI.restoreDepsStatus();
@@ -98,8 +104,9 @@ Neutralino.events.on('windowClose', () => Neutralino.app.exit());
     SettingsUI.applySettingsToUI(settings);
   } catch {}
 
-  initTabs({ Toast, DependencyUI, getPlayer });
+  initTabs({ Toast, DependencyUI, getPlayer, ApiDocs });
   Converter.initConvertScreen();
+  ApiDocs.initApiTab();
   Player.init();
   SettingsUI.initSettingsTab();
   void Player.loadLibrary({ force: true });

@@ -1181,6 +1181,41 @@ const YTDlp = (() => {
     return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name) ? `${name}_` : name;
   }
 
+  function fileNamePart(value, fallback = '', maxLength = 60) {
+    return sanitizeFileName(value, fallback)
+      .slice(0, Math.max(0, maxLength))
+      .replace(/[. ]+$/g, '');
+  }
+
+  function videoTitleWithUploader(title, uploader, fallback = 'video') {
+    const author = fileNamePart(uploader, '', 60);
+    if (!author) return sanitizeFileName(title, fallback);
+
+    const separator = ' - ';
+    const titleLimit = Math.max(30, 140 - author.length - separator.length);
+    const baseTitle = fileNamePart(title, fallback, titleLimit) || fallback;
+    return `${baseTitle}${separator}${author}`;
+  }
+
+  function douyinUploaderName(detail) {
+    const author = detail?.author || detail?.author_info || detail?.authorInfo || {};
+    return author.nickname ||
+      author.name ||
+      author.unique_id ||
+      author.uniqueId ||
+      author.short_id ||
+      author.shortId ||
+      author.sec_uid ||
+      author.uid ||
+      detail?.author_user_id ||
+      '';
+  }
+
+  function videoOutputTemplate(savePath) {
+    const basePath = String(savePath || '').replace(/\\/g, '/').replace(/\/+$/g, '');
+    return `${basePath}/%(title).120B - %(uploader,creator,channel,uploader_id,channel_id|unknown).60B.%(ext)s`;
+  }
+
   async function filePathExists(filePath) {
     try {
       await Neutralino.filesystem.getStats(filePath);
@@ -1308,12 +1343,14 @@ const YTDlp = (() => {
       ? String(format).toLowerCase()
       : 'mp4';
     const title = detail.desc || detail.caption || awemeId;
-    const finalFile = await uniqueOutputFile(savePath, title, outputFormat);
-    const downloadFile = outputFormat === 'mp4'
-      ? finalFile
-      : await uniqueOutputFile(savePath, `${title} 원본`, 'mp4');
+    const outputTitle = videoTitleWithUploader(title, douyinUploaderName(detail), awemeId);
+    const finalFile = await uniqueOutputFile(savePath, outputTitle, outputFormat);
 
     onProgress && onProgress(10, '', 'Douyin CDN 다운로드 중', 'download');
+    const downloadFile = outputFormat === 'mp4'
+      ? finalFile
+      : await uniqueOutputFile(savePath, outputTitle, 'mp4');
+
     await downloadDouyinMediaUrl({
       url: formatInfo.url,
       dest: downloadFile,
@@ -1391,7 +1428,7 @@ const YTDlp = (() => {
       onProgress
     });
 
-    const outTemplate = savePath.replace(/\\/g, '/') + '/%(title)s.%(ext)s';
+    const outTemplate = videoOutputTemplate(savePath);
     const args = [
       `-f "${videoFormatSelector(videoQuality, outputFormat)}"`,
       `--ffmpeg-location "${ff}"`,

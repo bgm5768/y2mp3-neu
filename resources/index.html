@@ -20,6 +20,9 @@
         <button class="nav-btn" data-tab="convert">
           <span class="nav-icon">⬇️</span> 변환
         </button>
+      <button class="nav-btn" data-tab="api">
+        <span class="nav-icon">⚙️</span> API
+      </button>
       <button class="nav-btn" data-tab="settings">
         <span class="nav-icon">⚙️</span> 설정
       </button>
@@ -261,6 +264,132 @@
         </div>
         <div id="queue-list" class="queue-list">
           <!-- Queue items injected by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== TAB: API ===== -->
+    <section id="tab-api" class="tab">
+      <div class="page-header">
+        <div>
+          <h1>API</h1>
+          <p class="subtitle">다른 Neutralino/브라우저 프로그램에서 변환 기능을 재사용할 때 복사해서 쓸 수 있는 예시입니다.</p>
+        </div>
+      </div>
+
+      <div class="api-layout">
+        <div class="card api-card api-config-card">
+          <h2 class="settings-section-title">빠른 샘플 생성</h2>
+          <div class="api-config-grid">
+            <label class="option-label">
+              작업 종류
+              <select id="api-mode-select" class="select">
+                <option value="audio" selected>MP3 변환</option>
+                <option value="video">동영상 다운로드</option>
+              </select>
+            </label>
+            <label class="option-label">
+              저장 폴더
+              <input id="api-save-path-input" class="api-input" type="text" placeholder="비워두면 현재 설정값 사용" autocomplete="off" spellcheck="false" />
+            </label>
+          </div>
+          <label class="option-label api-url-option">
+            테스트 URL
+            <textarea id="api-url-input" class="api-input api-url-sample" rows="3" autocomplete="off" spellcheck="false">https://www.youtube.com/watch?v=...</textarea>
+          </label>
+          <p id="api-current-path" class="settings-desc">현재 설정된 저장 위치를 불러오는 중입니다.</p>
+        </div>
+
+        <div class="card api-card">
+          <h2 class="settings-section-title">사용 순서</h2>
+          <ol class="api-steps">
+            <li>이 앱이 실행된 상태에서 API 탭의 예시 코드를 복사합니다.</li>
+            <li>같은 Neutralino 앱 안에서는 <code>window.YtMp3ConversionApi</code>를 바로 호출합니다.</li>
+            <li>별도 앱에서는 <code>conversion-api.js</code>, <code>url-parser.js</code>, <code>ytdlp.js</code>, <code>settings.js</code>를 함께 가져가고 의존성을 주입합니다.</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="api-section-grid">
+        <div class="card api-card api-code-card">
+          <div class="api-code-header">
+            <div>
+              <h2>앱 내부 전역 API</h2>
+              <p>현재 앱 화면이나 같은 WebView에서 바로 호출할 때 사용합니다.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" data-api-copy-target="api-snippet-global">복사</button>
+          </div>
+          <pre class="api-code"><code id="api-snippet-global"></code></pre>
+        </div>
+
+        <div class="card api-card api-code-card">
+          <div class="api-code-header">
+            <div>
+              <h2>모듈로 가져가서 쓰기</h2>
+              <p>다른 Neutralino 프로젝트에 파일을 옮겨 붙일 때의 기본 형태입니다.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" data-api-copy-target="api-snippet-module">복사</button>
+          </div>
+          <pre class="api-code"><code id="api-snippet-module"></code></pre>
+        </div>
+
+        <div class="card api-card api-code-card">
+          <div class="api-code-header">
+            <div>
+              <h2>여러 URL 배치 실행</h2>
+              <p>입력 문자열을 분석하고 유효한 URL만 순차 처리합니다.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" data-api-copy-target="api-snippet-batch">복사</button>
+          </div>
+          <pre class="api-code"><code id="api-snippet-batch"></code></pre>
+        </div>
+
+        <div class="card api-card api-code-card">
+          <div class="api-code-header">
+            <div>
+              <h2>진행률 콜백</h2>
+              <p>UI, 로그, LLM 툴 호출 결과에 진행 상태를 연결할 때 사용합니다.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" data-api-copy-target="api-snippet-progress">복사</button>
+          </div>
+          <pre class="api-code"><code id="api-snippet-progress"></code></pre>
+        </div>
+
+        <div class="card api-card api-code-card">
+          <div class="api-code-header">
+            <div>
+              <h2>LLM 툴 래퍼</h2>
+              <p>LM Studio 같은 LLM 클라이언트에서 함수 호출 결과로 넘기기 좋은 형태입니다.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" data-api-copy-target="api-snippet-tool">복사</button>
+          </div>
+          <pre class="api-code"><code id="api-snippet-tool"></code></pre>
+        </div>
+      </div>
+
+      <div class="card api-card">
+        <h2 class="settings-section-title">메서드 요약</h2>
+        <div class="api-method-list">
+          <div class="api-method-row">
+            <code>analyzeInput(text, options)</code>
+            <span>URL 여러 개를 분석하고 유효/중복/잘못된 URL을 나눕니다.</span>
+          </div>
+          <div class="api-method-row">
+            <code>convertItem(item, options)</code>
+            <span>단건 MP3 변환 또는 동영상 다운로드를 실행합니다.</span>
+          </div>
+          <div class="api-method-row">
+            <code>convertInput(text, options)</code>
+            <span>입력 문자열 전체를 분석하고 유효한 URL을 순차 실행합니다.</span>
+          </div>
+          <div class="api-method-row">
+            <code>loadInfo(item)</code>
+            <span>제목, 썸네일, 길이, 업로더 정보를 조회합니다.</span>
+          </div>
+          <div class="api-method-row">
+            <code>checkDeps({ refresh: true })</code>
+            <span>ffmpeg와 yt-dlp 설치 상태를 확인합니다.</span>
+          </div>
         </div>
       </div>
     </section>

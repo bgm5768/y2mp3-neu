@@ -3,7 +3,7 @@
  * URL analysis, conversion flow, dependency checks, and convert tab events.
  */
 
-import { normalizeMediaUrl, splitUrlTokens, stripUrlToken } from './url-parser.js';
+import { createConversionApi } from './conversion-api.js';
 import { createQueueActionHandler } from './queue-ui.js';
 
 export function createConverter({
@@ -39,6 +39,7 @@ export function createConverter({
       placeholder: 'https://www.youtube.com/watch?v=...\nhttps://www.instagram.com/reel/...\nhttps://www.tiktok.com/@user/video/...\nhttps://www.douyin.com/video/...\nhttps://www.xiaohongshu.com/explore/...'
     }
   };
+  const ConversionApi = createConversionApi({ YTDlp, Settings, Neutralino });
 
   function getConvertMode() {
     const active = document.querySelector('.convert-mode-btn.active');
@@ -56,29 +57,7 @@ export function createConverter({
     const input = document.getElementById('url-input');
     const mode = getConvertMode();
     const existingKeys = new Set(Queue.getAll().map(item => item.urlKey || item.url));
-    const seenKeys = new Set();
-    const valid = [];
-    const invalid = [];
-    let duplicateCount = 0;
-
-    splitUrlTokens(input.value).forEach(token => {
-      const normalized = normalizeMediaUrl(token, { allowedSources: modes[mode].allowedSources });
-      if (!normalized) {
-        invalid.push(stripUrlToken(token));
-        return;
-      }
-
-      const queueKey = `${mode}:${normalized.key}`;
-      if (seenKeys.has(queueKey) || existingKeys.has(queueKey)) {
-        duplicateCount += 1;
-        return;
-      }
-
-      seenKeys.add(queueKey);
-      valid.push({ ...normalized, queueKey });
-    });
-
-    appState.currentUrlAnalysis = { mode, valid, duplicateCount, invalid };
+    appState.currentUrlAnalysis = ConversionApi.analyzeInput(input.value, { mode, existingKeys });
     return appState.currentUrlAnalysis;
   }
 
@@ -191,10 +170,8 @@ export function createConverter({
   }
 
   function getConversionOptions(mode = getConvertMode()) {
-    const settings = Settings.get();
-    return {
+    return ConversionApi.createOptions({
       mode,
-      modeLabel: modes[mode]?.label || 'MP3',
       quality: document.getElementById('quality-select').value,
       format: document.getElementById('format-select').value,
       videoQuality: document.getElementById('video-quality-select')?.value || 'best',
@@ -203,11 +180,8 @@ export function createConverter({
         ? (document.getElementById('post-convert-playlist-select')?.value || '')
         : '',
       embedThumb: true,
-      embedMeta: true,
-      savePath: Settings.getActiveSavePath(mode),
-      proxy: settings.useProxy ? settings.proxy : '',
-      rateLimit: settings.useRateLimit ? `${settings.rateLimitVal}${settings.rateLimitUnit}` : ''
-    };
+      embedMeta: true
+    });
   }
 
   function clearAcceptedInput(analysis) {
@@ -271,7 +245,7 @@ export function createConverter({
     QueueUI.updateItem(item.id, { status: 'loading', pct: 2, eta: '정보 불러오는 중', errorMsg: '' });
 
     try {
-      const info = await YTDlp.getVideoInfo(item.url);
+      const info = await ConversionApi.loadInfo(item);
       QueueUI.updateItem(item.id, {
         title: info.title || item.title,
         thumbnail: info.thumbnail || item.thumbnail,
@@ -319,31 +293,12 @@ export function createConverter({
         });
       };
 
-      const filePath = options.mode === 'video'
-        ? await YTDlp.downloadVideo({
-          url: afterInfo.url,
-          videoQuality: options.videoQuality,
-          format: options.videoFormat,
-          savePath: options.savePath,
-          source: options.source,
-          rawUrl: options.rawUrl || afterInfo.rawUrl || afterInfo.url,
-          proxy: options.proxy,
-          rateLimit: options.rateLimit,
-          signal: appState.cancelController.signal,
-          onProgress: progressHandler
-        })
-        : await YTDlp.download({
-          url: afterInfo.url,
-          quality: options.quality,
-          format: options.format,
-          savePath: options.savePath,
-          embedThumb: options.embedThumb,
-          embedMeta: options.embedMeta,
-          proxy: options.proxy,
-          rateLimit: options.rateLimit,
-          signal: appState.cancelController.signal,
-          onProgress: progressHandler
-        });
+      const { filePath } = await ConversionApi.convertItem(afterInfo, {
+        ...options,
+        rawUrl: options.rawUrl || afterInfo.rawUrl || afterInfo.url,
+        signal: appState.cancelController.signal,
+        onProgress: progressHandler
+      });
 
       QueueUI.updateItem(id, {
         status: 'done',
@@ -586,7 +541,7 @@ export function createConverter({
 
       let deps;
       try {
-        deps = await YTDlp.checkDeps({ refresh: true });
+        deps = await ConversionApi.checkDeps({ refresh: true });
       } catch (e) {
         deps = {
           ffmpeg: { ok: false, path: '', version: '' },
@@ -677,6 +632,7 @@ ${text}` : text;
   }
 
   return {
+    api: ConversionApi,
     initConvertScreen,
     beginConvert,
     updateUrlAnalysisView,
