@@ -19,8 +19,8 @@ GitHub Release asset URL은 브라우저 `fetch`에서 CORS/redirect 문제를 �
 3. 같은 버전의 태그를 push합니다.
 
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+git tag v1.0.8
+git push origin v1.0.8
 ```
 
 태그는 반드시 `neutralino.config.json`의 `version`과 맞아야 합니다. 예를 들어 `version`이 `1.0.1`이면 태그는 `v1.0.1`이어야 합니다.

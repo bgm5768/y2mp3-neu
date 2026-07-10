@@ -375,6 +375,10 @@ function playlistOptions() {
   }));
 }
 
+function libraryTracks() {
+  return state.tracks.map(track => ({ ...track }));
+}
+
 async function addFilesToPlaylist(filePaths, playlistId) {
   const paths = (Array.isArray(filePaths) ? filePaths : [filePaths]).filter(Boolean);
   const playlist = state.playlists.find(item => item.id === playlistId);
@@ -1412,5 +1416,5 @@ export function createPlayer(dependencies = {}) {
     sortDirectionLabel
   });
 
-  return { init, loadLibrary, invalidate, playlistOptions, addFilesToPlaylist };
+  return { init, loadLibrary, invalidate, playlistOptions, addFilesToPlaylist, libraryTracks };
 }

@@ -252,6 +252,10 @@ export function createConversionApi({ YTDlp, Settings = null, Neutralino = null 
     return requireYtdlp().checkDeps(options);
   }
 
+  function searchYouTube(query, options = {}) {
+    return requireYtdlp().searchYouTube(query, options);
+  }
+
   function cancelActiveDownload() {
     return requireYtdlp().cancelActiveDownload?.();
   }
@@ -263,6 +267,7 @@ export function createConversionApi({ YTDlp, Settings = null, Neutralino = null 
     analyzeInput: analyzeConversionInput,
     createOptions: options,
     loadInfo,
+    searchYouTube,
     convertItem,
     convertInput,
     checkDeps,

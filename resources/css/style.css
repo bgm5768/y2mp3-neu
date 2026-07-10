@@ -238,6 +238,63 @@ body {
 .url-analysis.has-valid { color: var(--accent2); }
 .url-analysis.has-invalid { color: var(--warning); }
 
+/* ── AI Keyword Search ───────────────────────────── */
+.ai-search-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ai-search-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ai-search-header h2 {
+  font-size: 16px;
+  margin-bottom: 5px;
+}
+.ai-search-header p,
+.ai-search-status {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ai-search-status.status-ok { color: var(--accent2); }
+.ai-search-status.status-error { color: var(--danger); }
+.ai-search-status.status-working { color: var(--warning); }
+.ai-search-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 110px minmax(190px, .7fr) minmax(210px, auto) auto;
+  gap: 12px;
+  align-items: end;
+}
+.ai-llm-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto auto;
+  gap: 12px;
+  align-items: end;
+}
+.ai-keyword-field {
+  min-width: 0;
+}
+.ai-playlist-field {
+  min-width: 0;
+}
+.ai-limit-input {
+  text-align: center;
+}
+.ai-llm-toggle {
+  align-self: center;
+  margin-bottom: 8px;
+}
+.ai-search-footer {
+  min-height: 20px;
+}
+.queue-panel.queue-context-hidden {
+  display: none !important;
+}
+
 /* ── Video Preview ───────────────────────────────── */
 .video-preview {
   display: flex;
@@ -2155,6 +2212,16 @@ code {
   .player-transport {
     grid-template-columns: 52px 76px 52px minmax(140px, 1fr);
   }
+  .ai-search-grid {
+    grid-template-columns: minmax(0, 1fr) 120px;
+  }
+  .ai-llm-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .ai-llm-toggle,
+  #ai-keyword-download-btn {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 900px) {
@@ -2315,6 +2382,18 @@ code {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
+  }
+  .ai-search-header,
+  .ai-search-grid,
+  .ai-llm-grid {
+    grid-template-columns: 1fr;
+  }
+  .ai-search-header {
+    flex-direction: column;
+  }
+  .ai-llm-toggle,
+  #ai-keyword-download-btn {
+    grid-column: auto;
   }
   .convert-mode-tabs {
     display: flex;

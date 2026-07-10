@@ -312,6 +312,36 @@ const YTDlp = (() => {
     return `"${String(value || '').replace(/"/g, '\\"')}"`;
   }
 
+  function parseJsonLines(text) {
+    return String(text || '')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line.startsWith('{'))
+      .map(line => {
+        try { return JSON.parse(line); } catch { return null; }
+      })
+      .filter(Boolean);
+  }
+
+  function youtubeResultUrl(info) {
+    if (info?.webpage_url && /^https?:\/\//i.test(info.webpage_url)) return info.webpage_url;
+    if (info?.original_url && /^https?:\/\//i.test(info.original_url)) return info.original_url;
+    if (info?.url && /^https?:\/\//i.test(info.url)) return info.url;
+    const id = info?.id || info?.url || '';
+    return /^[A-Za-z0-9_-]{6,32}$/.test(String(id || ''))
+      ? `https://www.youtube.com/watch?v=${id}`
+      : '';
+  }
+
+  function thumbnailFromInfo(info) {
+    if (info?.thumbnail) return info.thumbnail;
+    const list = Array.isArray(info?.thumbnails) ? info.thumbnails : [];
+    return list
+      .slice()
+      .sort((a, b) => (Number(b.width) || 0) - (Number(a.width) || 0))
+      .find(item => item?.url)?.url || '';
+  }
+
   function escapeCmdPercents(value) {
     return String(value || '').replace(/%/g, '%%');
   }
@@ -347,6 +377,42 @@ const YTDlp = (() => {
   // ────────────────────────────────────────────────────────────────
   //  영상 정보 가져오기
   // ────────────────────────────────────────────────────────────────
+  async function searchYouTube(query, { limit = 5 } = {}) {
+    const text = String(query || '').trim();
+    const safeLimit = Math.max(1, Math.min(30, Number(limit) || 5));
+    if (!text) return [];
+
+    const yd = await ytdlpExe();
+    const searchUrl = `ytsearch${safeLimit}:${text}`;
+    const cmd = `"${yd}" --dump-json --flat-playlist --playlist-end ${safeLimit} --encoding utf-8 ${quoteArg(searchUrl)}`;
+    const r = await runCmd(cmd);
+    if (r.exitCode !== 0) {
+      const err = (r.stdErr || r.stdOut || '').trim();
+      throw new Error(err || 'YouTube 검색에 실패했습니다.');
+    }
+
+    const seen = new Set();
+    return parseJsonLines(r.stdOut)
+      .map(info => {
+        const url = youtubeResultUrl(info);
+        const id = String(info?.id || '').trim();
+        const key = id || url;
+        return {
+          id,
+          key: `youtube:${key}`,
+          url,
+          title: info?.title || url,
+          thumbnail: thumbnailFromInfo(info),
+          duration: info?.duration_string || formatDuration(info?.duration),
+          uploader: info?.uploader || info?.channel || '',
+          source: 'youtube',
+          sourceLabel: 'YouTube'
+        };
+      })
+      .filter(item => item.url && !seen.has(item.url) && seen.add(item.url))
+      .slice(0, safeLimit);
+  }
+
   async function getVideoInfo(url) {
     const yd  = await ytdlpExe();
     const cmd = `"${yd}" --dump-json --no-playlist "${url}"`;
@@ -1945,5 +2011,5 @@ const YTDlp = (() => {
     return `${m}:${s}`;
   }
 
-  return { checkDeps, getVideoInfo, download, downloadVideo, updateYtdlp, installYtdlp, installFfmpeg, cancelActiveDownload, cleanupTempScripts };
+  return { checkDeps, getVideoInfo, searchYouTube, download, downloadVideo, updateYtdlp, installYtdlp, installFfmpeg, cancelActiveDownload, cleanupTempScripts };
 })();

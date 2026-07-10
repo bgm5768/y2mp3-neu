@@ -7,7 +7,14 @@
 
 let Player = null;
 
+function syncQueueContext(tab) {
+  const panel = document.getElementById('queue-panel');
+  if (!panel) return;
+  panel.classList.toggle('queue-context-hidden', !['convert', 'ai'].includes(tab));
+}
+
 function initTabs({ Toast, DependencyUI, getPlayer, ApiDocs }) {
+  syncQueueContext(document.querySelector('.nav-btn.active')?.dataset.tab || 'player');
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') {
@@ -19,6 +26,7 @@ function initTabs({ Toast, DependencyUI, getPlayer, ApiDocs }) {
       btn.classList.add('active');
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       document.getElementById(`tab-${tab}`).classList.add('active');
+      syncQueueContext(tab);
       if (tab === 'player') {
         void getPlayer()?.loadLibrary({ force: true });
       } else if (tab === 'api') {
