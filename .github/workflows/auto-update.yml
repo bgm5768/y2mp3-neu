@@ -1,0 +1,64 @@
+name: Auto Update AI Downloader
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "AI_Downloader/**"
+      - "RELEASES/**"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Get latest release tag
+        id: get_latest_release
+        run: |
+          LATEST_RELEASE=$(git describe --tags ${{ github.sha }} --abbrev=0 || echo "")
+          if [ -z "$LATEST_RELEASE" ]; then
+            NEW_VERSION="1.0.9"
+          else
+            IFS='.' read -ra VERSION_PARTS <<< "$LATEST_RELEASE"
+            MAJOR=${VERSION_PARTS[0]}
+            MINOR=${VERSION_PARTS[1]}
+            PATCH=${VERSION_PARTS[2]}
+            NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest release: $LATEST_RELEASE -> New version: $NEW_VERSION"
+
+      - name: Create Release Notes
+        id: create_release_notes
+        run: |
+          cat > release_notes.md << 'EOF'
+## ✨ AI Downloader v${{ steps.get_latest_release.outputs.NEW_VERSION }}
+
+### 🎯 주요 변경사항
+- **PLAYLIST_KEYWORDS 로직 추가**: "Playlist", "노래모음" 등 강력하게 필터링
+- **공식 채널 우선 선택**: YouTube 공식 채널 우선으로 단일 곡 선택
+- **Fallback 로직**: 플레이리스트만 있을 경우 대표곡 (Love Wins, Bling-Bling) 자동 선택
+
+### 📊 필터링 기준
+```
+❌ "아이유 노래모음 [Playlist]" → 자동 스킵!
+✅ "IU 'Dear my crazy soulmate' MV" → 선택됨!
+✅ "아이유 - Love Wins" → 공식 채널 우선!
+```
+EOF
+          echo "RELEASE_NOTES<<EOF"
+          cat release_notes.md
+          echo "EOF"
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_VERSION=${{ steps.get_latest_release.outputs.NEW_VERSION }}
+          gh release create "v${NEW_VERSION}" \
+            --title "AI Downloader v${NEW_VERSION}" \
+            --notes "${{ steps.create_release_notes.outputs.RELEASE_NOTES }}" \
+            --latest
