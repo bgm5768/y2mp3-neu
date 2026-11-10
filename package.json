@@ -1,6 +1,6 @@
 {
   "name": "yt-mp3-converter",
-  "version": "1.0.0",
+  "version": "1.0.10",
   "description": "YouTube to MP3 Converter powered by Neutralinojs",
   "main": "extension/app.js",
   "scripts": {

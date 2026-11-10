@@ -155,6 +155,15 @@ export function createConverter({
     };
   }
 
+  function currentGeminiConfig() {
+    const settings = Settings.get();
+    return {
+      useGemini: document.getElementById('ai-use-gemini')?.checked ?? (settings.aiUseGemini !== false),
+      apiKey: String(document.getElementById('ai-gemini-api-key')?.value || settings.aiGeminiApiKey || '').trim(),
+      model: String(document.getElementById('ai-gemini-model')?.value || settings.aiGeminiModel || 'gemini-2.0-flash').trim()
+    };
+  }
+
   function aiEndpoint(path, config = currentAiLlmConfig()) {
     return `${normalizeAiBaseUrl(config.baseUrl)}${path.startsWith('/') ? path : `/${path}`}`;
   }
@@ -233,24 +242,35 @@ export function createConverter({
     const settings = Settings.get();
     const limit = Math.max(1, Math.min(30, Number(settings.aiDownloadLimit) || 5));
     const useLlm = settings.aiUseLocalLlm !== false;
+    const useGemini = settings.aiUseGemini !== false;
 
     const useEl = document.getElementById('ai-use-local-llm');
     const baseEl = document.getElementById('ai-llm-base-url');
     const modelEl = document.getElementById('ai-llm-model');
     const limitEl = document.getElementById('ai-limit-input');
+    const geminiToggle = document.getElementById('ai-use-gemini');
+    const geminiKey = document.getElementById('ai-gemini-api-key');
+    const geminiModel = document.getElementById('ai-gemini-model');
 
     if (useEl) useEl.checked = useLlm;
     if (baseEl) baseEl.value = normalizeAiBaseUrl(settings.aiLlmBaseUrl);
     if (modelEl) modelEl.value = settings.aiLlmModel || '';
     if (limitEl) limitEl.value = String(limit);
+    if (geminiToggle) geminiToggle.checked = useGemini;
+    if (geminiKey) geminiKey.value = settings.aiGeminiApiKey || '';
+    if (geminiModel) geminiModel.value = settings.aiGeminiModel || 'gemini-2.0-flash';
   }
 
   async function saveAiDownloaderSettings({ quiet = false } = {}) {
     const config = currentAiLlmConfig();
+    const geminiConfig = currentGeminiConfig();
     await Settings.save({
       aiUseLocalLlm: !!config.useLocalLlm,
       aiLlmBaseUrl: normalizeAiBaseUrl(config.baseUrl),
       aiLlmModel: config.model,
+      aiUseGemini: !!geminiConfig.useGemini,
+      aiGeminiApiKey: geminiConfig.apiKey,
+      aiGeminiModel: geminiConfig.model,
       aiDownloadLimit: aiLimitValue(),
       aiPostConvertPlaylistId: document.getElementById('ai-playlist-select')?.value || ''
     });
@@ -487,7 +507,77 @@ export function createConverter({
     void runQueue(added.map(item => item.id));
   }
 
+  async function invokeGeminiText(promptText, config = currentGeminiConfig()) {
+    if (!config.apiKey) throw new Error('Gemini API Key가 없습니다.');
+    const model = config.model || 'gemini-2.0-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+    const body = {
+      contents: [{ parts: [{ text: promptText }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 500 }
+    };
+    const bodyScript = `$body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${utf8Base64(JSON.stringify(body))}'))`;
+    const script = [
+      `$ErrorActionPreference = 'Stop'`,
+      `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`,
+      `$ProgressPreference = 'SilentlyContinue'`,
+      `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
+      `$uri = ${psQuote(url)}`,
+      bodyScript,
+      `$result = Invoke-RestMethod -Uri $uri -Method POST -Body $body -ContentType 'application/json; charset=utf-8' -TimeoutSec 30`,
+      `$result | ConvertTo-Json -Depth 30 -Compress`
+    ].join('\\n');
+    const command = `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${utf16LeBase64(script)}`;
+    const result = await Neutralino.os.execCommand(command);
+    if (Number(result?.exitCode || 0) !== 0) {
+      throw new Error((result?.stdErr || result?.stdOut || '').trim() || 'Gemini 요청 실패');
+    }
+    const out = String(result?.stdOut || '').trim();
+    if (!out) throw new Error('Gemini 응답 없음');
+    const data = JSON.parse(out);
+    return data?.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
+  }
+
+  async function geminiSearchQueries(keyword, limit, config = currentGeminiConfig()) {
+    const text = await invokeGeminiText(
+      `You create YouTube music search queries. Return strict JSON only: {"queries":["..."]}. keyword: ${keyword}\\nlimit: ${limit}\\nlanguage: Korean or original artist language allowed. Do not explain.`,
+      config
+    );
+    return parseAiQueryResponse(text, keyword, limit);
+  }
+
+  async function geminiSelectBestUrl(results, keyword, config = currentGeminiConfig()) {
+    const list = (results || []).map((item, index) => `${index + 1}. ${item.title || item.url} | ${item.url}`).join('\\n');
+    const text = await invokeGeminiText(
+      `Pick the single best song for the keyword "${keyword}" from this YouTube search result list. Return strict JSON only: {"index": number}. List:\\n${list}\\nDo not explain.`,
+      config
+    );
+    const cleaned = String(text || '').replace(/```(?:json)?|```/gi, '').trim();
+    const jsonText = cleaned.match(/\\{[\\s\\S]*\\}/)?.[0] || '';
+    let index = -1;
+    if (jsonText) {
+      try {
+        const parsed = JSON.parse(jsonText);
+        index = Number(parsed.index) - 1;
+      } catch {}
+    }
+    if (!Number.isInteger(index) || index < 0 || index >= results.length) {
+      // fallback: first result
+      index = 0;
+    }
+    return results[index] || null;
+  }
+
   async function aiSearchQueries(keyword, limit, config) {
+    const geminiConfig = currentGeminiConfig();
+    if (geminiConfig.useGemini && geminiConfig.apiKey) {
+      setAiSearchStatus('Gemini(MCP)로 검색어를 만드는 중…', 'working');
+      try {
+        return await geminiSearchQueries(keyword, limit, geminiConfig);
+      } catch (e) {
+        Toast.show(`Gemini 검색어 생성 실패, fallback 사용: ${e.message || e}`, 'warning', 7000);
+      }
+    }
+
     const useLocalLlm = !!config.useLocalLlm;
     if (!useLocalLlm) return [keyword];
 
@@ -664,7 +754,18 @@ export function createConverter({
       const queries = await aiSearchQueries(keyword, limit, llmConfig);
       await saveAiDownloaderSettings({ quiet: true });
       setAiSearchStatus(`검색어 ${queries.length}개 생성 · YouTube 검색 준비 중`, 'working');
-      const results = await collectYouTubeSearchResults(queries, limit, keyword);
+      let results = await collectYouTubeSearchResults(queries, limit, keyword);
+
+      const geminiConfig = currentGeminiConfig();
+      if (geminiConfig.useGemini && geminiConfig.apiKey && results.length > 1) {
+        setAiSearchStatus('Gemini(MCP)가 노래를 선택하는 중…', 'working');
+        try {
+          const picked = await geminiSelectBestUrl(results, keyword, geminiConfig);
+          if (picked) results = [picked];
+        } catch (e) {
+          Toast.show(`Gemini 선택 실패, 검색 결과 전체 사용: ${e.message || e}`, 'warning', 5000);
+        }
+      }
 
       if (!results.length) {
         setAiSearchStatus('검색 결과를 찾지 못했습니다. 키워드를 더 구체적으로 입력해 보세요.', 'error');
@@ -1090,6 +1191,16 @@ ${text}` : text;
     document.getElementById('ai-use-local-llm')?.addEventListener('change', () => {
       void saveAiDownloaderSettings({ quiet: true });
       updateAiKeywordButton();
+    });
+    document.getElementById('ai-use-gemini')?.addEventListener('change', () => {
+      void saveAiDownloaderSettings({ quiet: true });
+      updateAiKeywordButton();
+    });
+    document.getElementById('ai-gemini-api-key')?.addEventListener('change', () => {
+      void saveAiDownloaderSettings({ quiet: true });
+    });
+    document.getElementById('ai-gemini-model')?.addEventListener('change', () => {
+      void saveAiDownloaderSettings({ quiet: true });
     });
     document.getElementById('ai-llm-base-url')?.addEventListener('change', () => {
       void saveAiDownloaderSettings({ quiet: true });

@@ -106,10 +106,9 @@ function applySavedPlayerSettings() {
 
   state.orderMode = settings.playerOrderMode || state.orderMode;
   state.repeatMode = settings.playerRepeatMode || state.repeatMode;
-  state.playlists = sanitizePlaylists(settings.playerPlaylists);
-  state.activePlaylistId = settings.playerActivePlaylistId === 'all' || state.playlists.some(playlist => playlist.id === settings.playerActivePlaylistId)
-    ? (settings.playerActivePlaylistId || 'all')
-    : 'all';
+  // Playlist concept removed: always show the directory directly.
+  state.playlists = [];
+  state.activePlaylistId = 'all';
   state.restoringPosition = Math.max(0, Number(settings.playerLastPosition) || 0);
 
   const volumeEl = el('player-volume');
@@ -783,8 +782,7 @@ async function loadLibrary({ force = false } = {}) {
     }
     state.tracks = mergeKnownTrackData(tracks);
     state.loadedPath = loadedPath;
-    await reconcilePlaylistsWithFolders();
-    trimMissingPlaylistTracks();
+    // Playlist concept removed: no folder reconciliation.
     rebuildQueue(currentId);
     render();
     void hydrateTrackDurations();

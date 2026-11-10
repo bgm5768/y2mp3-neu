@@ -106,13 +106,7 @@
         <div class="player-list-heading">
           <div class="player-list-title-row">
             <h2>음악</h2>
-            <div class="player-playlist-dropdown">
-              <button id="player-playlist-btn" class="player-playlist-btn" type="button" aria-haspopup="menu" aria-expanded="false">
-                내 음악
-                <span aria-hidden="true">⌄</span>
-              </button>
-              <div id="player-playlist-menu" class="player-playlist-menu hidden" role="menu"></div>
-            </div>
+            <!-- playlist concept removed: directory shown directly -->
           </div>
           <p id="player-summary" class="queue-summary">음악 파일 0개</p>
         </div>
@@ -225,13 +219,7 @@
               </select>
             </label>
 
-            <label class="option-label audio-option convert-playlist-option">
-              변환 후
-              <select id="post-convert-playlist-select" class="select">
-                <option value="">플레이리스트에 추가 안 함</option>
-              </select>
-              <small id="post-convert-playlist-hint" class="convert-option-hint">완료된 파일을 선택한 플레이리스트에 자동 추가합니다.</small>
-            </label>
+            <!-- playlist concept removed: files are stored in directories directly -->
 
             <!-- <label class="option-label checkbox-label">
               <input type="checkbox" id="embed-thumb" checked />
@@ -278,12 +266,7 @@
             받을 곡 수
             <input id="ai-limit-input" class="url-input ai-limit-input" type="number" min="1" max="30" value="5" />
           </label>
-          <label class="option-label ai-playlist-field">
-            플레이리스트
-            <select id="ai-playlist-select" class="select">
-              <option value="">플레이리스트에 추가 안 함</option>
-            </select>
-          </label>
+          <!-- playlist concept removed -->
           <label class="option-label checkbox-label ai-llm-toggle">
             <input id="ai-use-local-llm" type="checkbox" checked />
             LM Studio 로컬 LLM으로 검색어 확장
@@ -306,8 +289,23 @@
         </div>
 
         <div class="ai-llm-grid">
+          <label class="option-label checkbox-label ai-llm-toggle">
+            <input id="ai-use-gemini" type="checkbox" checked />
+            Gemini(MCP) ?�로 노래 ?�택
+          </label>
           <label class="option-label">
-            API Base URL
+            Gemini API Key
+            <input id="ai-gemini-api-key" class="url-input" type="password" placeholder="Google AI Studio API Key" autocomplete="off" spellcheck="false" />
+          </label>
+          <label class="option-label">
+            Gemini 모델
+            <input id="ai-gemini-model" class="url-input" type="text" value="gemini-2.0-flash" autocomplete="off" spellcheck="false" />
+          </label>
+          <button id="ai-save-llm-btn" class="btn btn-secondary" type="button">?�정 ?�??/button>
+        </div>
+        <div class="ai-llm-grid">
+          <label class="option-label">
+            LM Studio Base URL (fallback)
             <input id="ai-llm-base-url" class="url-input" type="text" value="http://127.0.0.1:1234/v1" autocomplete="off" spellcheck="false" />
           </label>
           <label class="option-label">
